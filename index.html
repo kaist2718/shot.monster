@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+
+  <title>shot.monster - 멀티플레이</title>
+  <meta name="description" content="실시간 2D 배틀로얄 — shot.monster. AI 캠페언 / 인간 멀티.">
+  <meta name="application-name" content="shot.monster">
+  <meta name="theme-color" content="#20242b">
+
+  <!-- 모바일/설치형 앱(PWA) 메타: 홈화면 추가 시 전체화면 스탠드얼론 실행 -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="shot.monster">
+  <meta name="format-detection" content="telephone=no">
+
+  <!-- PWA 매니페스트 + 아이콘 -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- 부트 스플래시 + 방향 가이드(인스턴트 표시 — main.js 로드 전에 그려진다) -->
+  <style>
+    #boot-splash{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;
+      align-items:center;justify-content:center;gap:18px;background:#20242b;color:#fff;
+      font-family:"Segoe UI","Malgun Gothic",system-ui,sans-serif;
+      transition:opacity .45s ease;will-change:opacity}
+    #boot-splash.hidden{opacity:0;pointer-events:none}
+    .bs-logo{position:relative;width:104px;height:104px}
+    .bs-ring{position:absolute;inset:18px;border:7px solid #ffd23f;border-radius:50%;
+      box-shadow:0 0 20px rgba(255,210,63,.5),inset 0 0 8px rgba(255,210,63,.25)}
+    .bs-dot{position:absolute;left:50%;top:50%;width:16px;height:16px;background:#ffd23f;
+      border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 10px rgba(255,210,63,.7)}
+    .bs-title{font-size:28px;font-weight:800;letter-spacing:1.5px;color:#ffd23f;text-shadow:0 2px 12px rgba(0,0,0,.5)}
+    .bs-spinner{width:32px;height:32px;border:3px solid rgba(255,255,255,.16);border-top-color:#ffd23f;
+      border-radius:50%;animation:bspin .8s linear infinite}
+    .bs-status{font-size:12px;letter-spacing:.5px;opacity:.6}
+    @keyframes bspin{to{transform:rotate(360deg)}}
+
+    /* 세로모드 가로 권장 토스트 */
+    #orient-hint{position:fixed;top:env(safe-area-inset-top,0);left:0;right:0;z-index:60;
+      display:none;justify-content:center;pointer-events:none;padding:8px;
+      font-family:"Segoe UI","Malgun Gothic",system-ui,sans-serif}
+    #orient-hint.show{display:flex}
+    #orient-hint .orient-ico{width:18px;height:18px;border:2px solid #ffd23f;border-radius:3px;position:relative;display:inline-block;flex:0 0 auto;box-sizing:border-box}#orient-hint .orient-ico:after{content:"";position:absolute;right:-6px;top:2px;width:7px;height:7px;border-top:2px solid #ffd23f;border-right:2px solid #ffd23f;transform:rotate(45deg);box-sizing:border-box}#orient-hint .pill{pointer-events:auto;display:flex;align-items:center;gap:8px;
+      background:rgba(20,24,30,.92);color:#fff;font-size:13px;font-weight:600;
+      padding:9px 16px;border-radius:999px;border:1px solid rgba(255,210,63,.5);
+      box-shadow:0 4px 18px rgba(0,0,0,.45)}
+  </style>
+</head>
+<body>
+  <!-- 인스턴트 로딩 스플래시: 첫 상호작용(시작 화면) 직전에 client/boot.js 가 숨김 -->
+  <div id="boot-splash" aria-hidden="true">
+    <div class="bs-logo"><span class="bs-ring"></span><span class="bs-dot"></span></div>
+    <div class="bs-title">shot.monster</div>
+    <div class="bs-spinner" aria-hidden="true"></div>
+    <div class="bs-status">LOADING…</div>
+  </div>
+
+  <div id="orient-hint" aria-hidden="true"><div class="pill"><span class="orient-ico" aria-hidden="true"></span><span id="orient-hint-text">가로 모드를 권장합니다</span></div></div>
+
+  <canvas id="game"></canvas>
+
+  <!-- socket.io 클라이언트(전역 io 제공) + ESM 진입점 -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/client/main.js"></script>
+
+  <!-- 서비스워커(오프라인 지원, network-first). 실패해도 게임은 정상 동작. -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').catch(function () { /* 베스트에포트 — 무시 */ });
+      });
+    }
+  </script>
+</body>
+</html>

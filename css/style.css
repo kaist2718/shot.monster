@@ -1,0 +1,86 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #20242b;
+  font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  /* 모바일: 제스처/스크롤 방지 */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  position: fixed;       /* 주소창 숨김/당김에 따른 리플로우 방지 */
+  inset: 0;
+}
+
+#game {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  cursor: crosshair;
+  /* 터치 시 브라우저 기본 제스처(스크롤/줌/스와이프) 차단 — 게임이 직접 처리 */
+  touch-action: none;
+}
+
+/* ---- DOM 오버레이(시작/모드/룸) 공통 폴리싱 ----
+   인라인 스타일과 충돌하지 않는 보조 속성(전환/호버/active)만 부여한다. */
+#start-screen, #mode-screen, #room-screen, #settings-screen {
+  background: radial-gradient(circle at 50% 28%, rgba(44,50,64,0.97), rgba(14,18,25,0.98));
+  animation: overlay-fadein 0.35s ease-out;
+}
+
+@keyframes overlay-fadein {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+#start-screen button, #mode-screen button, #room-screen button, #settings-screen button {
+  cursor: pointer;
+  transition: transform .1s ease, filter .12s ease, box-shadow .12s ease, background .15s ease;
+}
+#start-screen button:hover, #mode-screen button:hover, #room-screen button:focus-visible,
+#settings-screen button:hover {
+  filter: brightness(1.12);
+  box-shadow: 0 4px 20px rgba(255,210,63,0.15);
+}
+#start-screen button:active, #mode-screen button:active, #room-screen button:active,
+#settings-screen button:active {
+  transform: scale(0.96);
+}
+#start-screen input, #mode-screen input, #room-screen select, #settings-screen input {
+  font-family: inherit;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+#start-screen input:focus, #room-screen select:focus, #settings-screen input:focus {
+  outline: none;
+  border-color: rgba(255,210,63,0.7);
+  box-shadow: 0 0 0 3px rgba(255,210,63,0.15);
+}
+
+/* 터치 가능 기기: safe-area 여백 유틸 */
+body.touch-capable {
+  /* mute 등은 인라인+env 로 배치. 여기선 선택자 훅만. */
+}
+
+/* 접근성: 포커스 링 */
+button:focus-visible {
+  outline: 2px solid rgba(255,210,63,0.75);
+  outline-offset: 2px;
+}
+
+/* 아이콘 버튼(음소거 등) — SVG 중앙 정렬 */
+button svg {
+  display: block;
+  pointer-events: none;
+}
+
+/* 모드 선택 카드 버튼 호버 시 아이콘 영역 살짝 밝게 */
+#mode-screen button > div:first-child {
+  transition: transform .1s ease, background .15s ease;
+}
+#mode-screen button:hover > div:first-child {
+  background: rgba(0,0,0,0.20);
+  transform: scale(1.05);
+}
