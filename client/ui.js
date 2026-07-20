@@ -96,9 +96,7 @@ export function drawHUD(ctx, W, H, info) {
     else drawDesktopStatus(ctx, W, H, self, snap);
   }
 
-  if (snap) {
-    try { drawMinimap(ctx, W, H, snap, self, touch); } catch (e) { /* 미니맵 오류 무시 */ }
-  }
+  if (snap) drawMinimap(ctx, W, H, snap, self, touch);
 }
 
 // 모바일: 상단 중앙 콤팩트 그룹(체력바 + 탄약). 무기 교체는 벡터 weapon 버튼.

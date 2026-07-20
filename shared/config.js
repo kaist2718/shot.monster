@@ -59,7 +59,7 @@ export const CONFIG = {
   // 화면 줌(모바일 시야). 데스크탑은 1:1, 모바일은 더 넓게 축소.
   // 사용자가 슬라이더/핀치/휠로 수동 조정 가능(범위 내).
   VIEW: {
-    MOBILE_TARGET_WIDTH: 1500,
+    MOBILE_TARGET_WIDTH: 1200,
     MIN_ZOOM: 0.18,
     MAX_ZOOM: 1.6,   // 데스크탑 휠/모바일 핀치로 확대(줌인) 가능 — 1.0이면 휠 업이 무반응
   },
