@@ -23,7 +23,7 @@ import { GamepadCtrl } from './gamepad.js';
 import { applyAimAssist, resetAimAssist } from './aimassist.js';
 import { setButtonIcon } from './icons.js';
 import { CONFIG, WEAPONS } from '../shared/config.js';
-import { lerp, lerpAngle, dist, clamp, circleRect } from '../shared/utils.js';
+import { lerp, lerpAngle, dist, clamp, circleRect, TAU, roundRect } from '../shared/utils.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -61,6 +61,10 @@ let lastCursor = '';
 let serverFullMsg = false;
 let preferTouchUi = false;      // HUD/스틱 표시용(hysteresis)
 let hintAge = 0;
+
+// 미니맵 핑 / 퀵챗 표시
+let activePings = []; // { x, y, type, name, ttl }
+let activeEmotes = []; // { name, type, ttl }
 
 const particles = new Particles();
 const prevAmmo = new Map();
@@ -177,6 +181,8 @@ let lastBuzz = 0;
 TouchCtrl.init(canvas, camera, {
   onOrient: toggleOrientation,
   onSwitchWeapon: switchWeaponTouch,
+  onEmote: (type) => { Net.sendEmote(type); },
+  onMapPing: (wx, wy, type) => { Net.sendMapPing(wx, wy, type); },
   onThrowGrenade: (clientX, clientY) => {
     // 화면 좌표를 월드 좌표로 변환하여 현재 각도로 수류탄 투척
     if (latest && self && self.alive) {
@@ -273,6 +279,15 @@ function initNet() {
     onMultiList: () => { if (RoomBrowser._root) RoomBrowser.refresh(); },
     onAIRoundOver: (ev) => { lastAIResult = ev; },
     onServerFull: () => { serverFullMsg = true; },
+    onMapPing: (e) => {
+      // 월드 핑 표시 (3초 지속)
+      activePings.push({ x: e.x, y: e.y, type: e.type, name: e.name, ttl: 3 });
+      if (activePings.length > 10) activePings.shift();
+    },
+    onEmote: (e) => {
+      activeEmotes.push({ name: e.name, type: e.type, ttl: 2.5 });
+      if (activeEmotes.length > 8) activeEmotes.shift();
+    },
   }, gameProfile, 'multi');
 }
 
@@ -327,16 +342,8 @@ function resolveAimAngle(raw, source) {
 
 function rawAimFromTouch() {
   const t = Input.touch;
-  const scheme = MobileSettings.get('scheme') || 'dual';
-
-  // 캐주얼 모드: 가장 가까운 적 자동조준
-  if (scheme === 'casual' && self && self.alive && latest) {
-    const nearest = latest.entities.find((e) => {
-      if (e.id === Net.yourId || !e.alive || !e.isBot) return false;
-      return dist(e.x, e.y, self.x, self.y) < 350;
-    });
-    if (nearest) return Math.atan2(nearest.y - self.y, nearest.x - self.x);
-  }
+  // _syncCasual / 듀얼 스틱 _sync에서 이미 t.aimX/t.aimY/t.aiming 값이 설정됨
+  // 캐주얼 모드의 aimAssist 조준도 _syncCasual에서 처리되어 t.aimX/t.aimY에 반영됨
 
   if (t.aiming) return Math.atan2(t.aimY, t.aimX);
   if (t.moveX || t.moveY) return Math.atan2(t.moveY, t.moveX);
@@ -374,31 +381,8 @@ function buildContract() {
   if (useTouchContract()) {
     preferTouchUi = true;
     const t = Input.touch;
-    const scheme = MobileSettings.get('scheme') || 'dual';
-
-    // 캐주얼 모드: 이동 목표 기반 이동 + 자동 사격
-    if (scheme === 'casual' && self && self.alive && latest) {
-      const origin = predictedSelf || self;
-      if (TouchCtrl._casualTarget) {
-        const dx = TouchCtrl._casualTarget.x - origin.x;
-        const dy = TouchCtrl._casualTarget.y - origin.y;
-        const distToTarget = Math.hypot(dx, dy);
-        if (distToTarget > 30) {
-          t.moveX = clamp(dx / distToTarget, -1, 1);
-          t.moveY = clamp(dy / distToTarget, -1, 1);
-        } else {
-          t.moveX = 0;
-          t.moveY = 0;
-        }
-        // 자동 사격 (autoFire = true 기본)
-        const shouldFire = MobileSettings.get('autoFire') &&
-          distToTarget < 200 &&
-          MobileSettings.get('aimAssist');
-        if (shouldFire) {
-          t.firing = true;
-        }
-      }
-    }
+    // _syncCasual (touch.js)에서 이미 이동/조준/사격을 처리했으므로
+    // 여기서는 t에 설정된 값을 그대로 사용 (중복 로직 제거)
 
     const ang = resolveAimAngle(rawAimFromTouch(), 'touch');
     if (t.reloadEdge) stickyReload = true;
@@ -612,17 +596,6 @@ function step(ts) {
       prevSelfAlive = self.alive;
     } else prevSelfAlive = null;
 
-    // 캐주얼 모드: 타겟에 도달하면 타겟 클리어
-    const scheme = MobileSettings.get('scheme') || 'dual';
-    if (scheme === 'casual' && TouchCtrl._casualTarget && self && self.alive) {
-      const dx = TouchCtrl._casualTarget.x - self.x;
-      const dy = TouchCtrl._casualTarget.y - self.y;
-      const distToTarget = Math.hypot(dx, dy);
-      if (distToTarget < 25) {
-        TouchCtrl._casualTarget = null;
-      }
-    }
-
     syncPredicted();
     if (predictedSelf) integratePrediction(dt);
 
@@ -632,6 +605,15 @@ function step(ts) {
     for (let i = killFeed.length - 1; i >= 0; i--) {
       killFeed[i].ttl -= dt;
       if (killFeed[i].ttl <= 0) killFeed.splice(i, 1);
+    }
+    // 핑/이모트 디케이
+    for (let i = activePings.length - 1; i >= 0; i--) {
+      activePings[i].ttl -= dt;
+      if (activePings[i].ttl <= 0) activePings.splice(i, 1);
+    }
+    for (let i = activeEmotes.length - 1; i >= 0; i--) {
+      activeEmotes[i].ttl -= dt;
+      if (activeEmotes[i].ttl <= 0) activeEmotes.splice(i, 1);
     }
 
     particles.update(dt);
@@ -692,6 +674,50 @@ function step(ts) {
     const SX = (wx) => (wx - camera.x) * z;
     const SY = (wy) => (wy - camera.y) * z;
     particles.draw(ctx, SX, SY, z);
+
+    // 미니맵 핑 표시 (월드 좌표)
+    for (const p of activePings) {
+      const px = SX(p.x), py = SY(p.y);
+      const pa = Math.min(1, p.ttl / 3);
+      // 핑 안쪽 원
+      ctx.save();
+      ctx.globalAlpha = pa * 0.6;
+      ctx.fillStyle = p.type === 'enemy' ? '#ff4444' : (p.type === 'loot' ? '#44ff44' : '#ffd23f');
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.shadowBlur = 14;
+      ctx.beginPath(); ctx.arc(px, py, 12 * z, 0, TAU); ctx.fill();
+      ctx.restore();
+      // 핑 바깥 링 (펄스)
+      ctx.save();
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.008 + p.x * 0.01);
+      ctx.globalAlpha = pa * 0.3 * pulse;
+      ctx.strokeStyle = p.type === 'enemy' ? '#ff4444' : (p.type === 'loot' ? '#44ff44' : '#ffd23f');
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(px, py, (18 + 8 * pulse) * z, 0, TAU); ctx.stroke();
+      ctx.restore();
+    }
+
+    // 퀵챗 이모트 표시
+    for (const em of activeEmotes) {
+      // 가장 가까운 엔티티에 표시
+      if (latest) {
+        const target = latest.entities.find((e) => e.name === em.name);
+        if (target) {
+          const ex = SX(target.x), ey = SY(target.y) - 32 * z;
+          const ea = Math.min(1, em.ttl / 2.5);
+          ctx.save();
+          ctx.globalAlpha = ea;
+          ctx.fillStyle = 'rgba(0,0,0,0.5)';
+          roundRect(ctx, ex - 20, ey - 14, 40, 22, 8); ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.font = '13px sans-serif';
+          ctx.textAlign = 'center';
+          const emojiMap = { hello: '👋', thanks: '👍', gg: '👏', sorry: '🙏', help: '🆘' };
+          ctx.fillText(emojiMap[em.type] || '👋', ex, ey + 3);
+          ctx.restore();
+        }
+      }
+    }
   }
   ctx.restore();
 

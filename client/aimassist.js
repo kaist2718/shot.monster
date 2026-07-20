@@ -6,15 +6,15 @@
 
 import { angleDiff, approachAngle, dist, circleRect } from '../shared/utils.js';
 
-const ASSIST_RANGE = 480;       // 사거리 확대
-const ASSIST_CONE = 0.75;       // ~43° half-angle (rad) - 더 넓은 콘
-const MAX_DEG_PER_SEC = 110;     // strength=1 기준 초당 최대 보정(도) - 더 빠른 보정
+const ASSIST_RANGE = 500;       // 사거리 확대 (기존 480)
+const ASSIST_CONE = 0.85;       // ~49° half-angle (rad) - 더 넓은 콘
+const MAX_DEG_PER_SEC = 130;     // strength=1 기준 초당 최대 보정(도) - 더 빠른 보정
 
-// Sticky 시간: 설정에서 가져오거나 기본값 사용 (aimAssistStickiness는 라디안 각도, 여기서는 시간으로 변환)
-const DEFAULT_STICKY_MS = 400;  // 기본 sticky 유지 시간(ms)
+// Sticky 시간: 설정에서 가져오거나 기본값 사용
+const DEFAULT_STICKY_MS = 500;  // 기본 sticky 유지 시간(ms)
 function getStickyMs(stickiness) {
-  // stickiness 값(0~1)에 따라 200~600ms 범위로 매핑
-  const ms = stickiness != null ? 200 + stickiness * 400 : DEFAULT_STICKY_MS;
+  // stickiness 값(0~1)에 따라 200~800ms 범위로 매핑
+  const ms = stickiness != null ? 200 + stickiness * 600 : DEFAULT_STICKY_MS;
   return ms;
 }
 
@@ -59,10 +59,10 @@ export function applyAimAssist(angle, ctx) {
     if (ad > ASSIST_CONE) continue;
     if (obstacles && !hasLOS(ox, oy, e.x, e.y, obstacles)) continue;
     // 각도 가중 + 거리. sticky 보너스.
-    let score = ad * 180 + d * 0.04;
-    if (preferId && e.id === preferId) score *= 0.55;
+    let score = ad * 160 + d * 0.035;
+    if (preferId && e.id === preferId) score *= 0.45;
     if (typeof e.health === 'number' && typeof e.maxHealth === 'number' && e.maxHealth > 0) {
-      score *= 0.85 + 0.15 * (e.health / e.maxHealth); // 저체력 약간 선호
+      score *= 0.80 + 0.20 * (e.health / e.maxHealth); // 저체력 더 선호
     }
     if (score < bestScore) { bestScore = score; best = e; }
   }
@@ -73,14 +73,15 @@ export function applyAimAssist(angle, ctx) {
   }
 
   stickyId = best.id;
-  // stickiness는 main.js에서 aimAssistStickiness 설정을 전달 (없으면 기본값)
   const stickiness = ctx.stickiness != null ? ctx.stickiness : null;
   stickyUntil = now + getStickyMs(stickiness);
 
   const target = Math.atan2(best.y - oy, best.x - ox);
   const falloff = 1 - Math.min(1, dist(ox, oy, best.x, best.y) / ASSIST_RANGE);
   const coneFall = 1 - Math.min(1, Math.abs(angleDiff(angle, target)) / ASSIST_CONE);
-  const maxStep = (MAX_DEG_PER_SEC * strength * falloff * (0.4 + 0.6 * coneFall) * Math.PI / 180) * dt;
+  // strength가 낮아도 어느 정도 보정이 들어가도록 하한 설정
+  const effectiveStr = 0.15 + 0.85 * strength;
+  const maxStep = (MAX_DEG_PER_SEC * effectiveStr * falloff * (0.3 + 0.7 * coneFall) * Math.PI / 180) * dt;
   return approachAngle(angle, target, maxStep);
 }
 

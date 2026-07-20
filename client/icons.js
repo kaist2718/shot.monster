@@ -5,7 +5,7 @@
 // DOM: iconSVG(name, size) → inline SVG 문자열
 // ============================================================
 
-/** @typedef {'zoomIn'|'zoomOut'|'board'|'orient'|'settings'|'weapon'|'reload'|'fire'|'run'|'soundOn'|'soundOff'|'health'|'pistol'|'smg'|'shotgun'|'coin'|'swipe'|'gamepad'|'ai'|'multi'|'play'|'trophy'} IconName */
+/** @typedef {'zoomIn'|'zoomOut'|'board'|'orient'|'settings'|'weapon'|'reload'|'fire'|'run'|'soundOn'|'soundOff'|'health'|'pistol'|'smg'|'shotgun'|'coin'|'swipe'|'gamepad'|'ai'|'multi'|'play'|'trophy'|'grenade'|'chat'} IconName */
 
 /**
  * @param {CanvasRenderingContext2D} ctx
@@ -221,6 +221,43 @@ export function drawIcon(ctx, name, x, y, size, color = '#fff') {
       ctx.moveTo(-s * 0.35, s * 0.55); ctx.lineTo(s * 0.35, s * 0.55);
       ctx.stroke();
       break;
+    case 'chat':
+      // 말풍선
+      ctx.beginPath();
+      ctx.arc(0, -s * 0.12, s * 0.45, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(s * 0.2, s * 0.15);
+      ctx.lineTo(s * 0.5, s * 0.5);
+      ctx.lineTo(s * 0.3, s * 0.15);
+      ctx.closePath();
+      ctx.stroke();
+      // 말풍선 내부 점 세 개
+      ctx.beginPath();
+      ctx.arc(-s * 0.15, -s * 0.12, s * 0.06, 0, Math.PI * 2); ctx.fill();
+      ctx.arc(0, -s * 0.12, s * 0.06, 0, Math.PI * 2); ctx.fill();
+      ctx.arc(s * 0.15, -s * 0.12, s * 0.06, 0, Math.PI * 2); ctx.fill();
+      break;
+    case 'grenade':
+      // 수류탄: 둥근 몸통 + 핀
+      ctx.beginPath();
+      ctx.arc(0, s * 0.1, s * 0.55, 0, Math.PI * 2);
+      ctx.stroke();
+      // 핀
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 0.45);
+      ctx.lineTo(0, -s * 0.75);
+      ctx.stroke();
+      // 핀 링
+      ctx.beginPath();
+      ctx.arc(0, -s * 0.85, s * 0.15, 0, Math.PI * 2);
+      ctx.stroke();
+      // 퓨즈 라인
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 0.45);
+      ctx.quadraticCurveTo(s * 0.2, -s * 0.3, s * 0.2, -s * 0.1);
+      ctx.stroke();
+      break;
     default:
       // fallback diamond
       ctx.beginPath();
@@ -346,6 +383,8 @@ export function iconSVG(name, size = 22, color = 'currentColor') {
       return `<svg ${common}><rect x="6" y="8" width="12" height="10" rx="2"/><path d="M12 4v4M9 12h.01M15 12h.01M9 16h6"/></svg>`;
     case 'multi':
       return `<svg ${common}><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c0-3 3-5 6-5s6 2 6 5M14 19c0-2 2-3.5 4.5-3.5S23 17 23 19"/></svg>`;
+    case 'grenade':
+      return `<svg ${common}><circle cx="12" cy="15" r="6"/><path d="M12 9v-4M12 5l-2-2M12 5l2-2"/><path d="M16 12c0-2.5-2-4-4-4s-4 1.5-4 4"/></svg>`;
     default:
       return `<svg ${common}><circle cx="12" cy="12" r="8"/></svg>`;
   }

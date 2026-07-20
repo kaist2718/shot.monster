@@ -21,8 +21,8 @@ const DEFAULTS = {
   zoomSens: 1.0,        // 0.6~1.6
   stickOpacity: 0.85,   // 0.35~1
   aimAssist: true,      // soft pull (touch/gamepad)
-  aimAssistStr: 0.65,   // 0~1 (더 민감하게 증가)
-  aimAssistStickiness: 0.18, // 조준 유지 각도(라디안) - 활주/잡기 방지용
+  aimAssistStr: 0.55,   // 0~1 (기본 중간)
+  aimAssistStickiness: 0.25, // 조준 유지 시간(ms로 변환) - 활주/잡기 방지용
   gamepadEnabled: true,
   quality: 'high',      // 'high' | 'med' | 'low' — 파티클/그림자 밀도
   particles: true,

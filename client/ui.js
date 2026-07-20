@@ -17,33 +17,38 @@ export function drawHUD(ctx, W, H, info) {
   // 모바일 미니맵 크기: 작은 화면에서는 더 작게 (세로모드 보정)
   const isLandscape = W > H;
   const minimapSize = touch ? (minD < 450 ? 80 : (isLandscape ? 96 : 104)) : 150;
-  // 핑/코인 위치: 작은 화면에서는 더 위로
-  const topStartY = minD < 500 ? 72 : 92;
+  // 핑/코인 위치: 작은 화면에서는 더 위로, 아주 작은 화면은 더 좁게
+  const topStartY = minD < 500 ? 72 : (minD < 600 ? 82 : 92);
+  // 좌측 여백: 작은 화면에서 더 좁게
+  const leftPad = minD < 400 ? 10 : 16;
 
   ctx.font = '12px sans-serif';
   if (touch) {
     // 모바일: 핑/코인/점수/순위 를 좌상단(보조 버튼 아래)에 세로로. 상단 중앙은 체력/탄약이 씀.
     ctx.textAlign = 'left';
+    // 아주 작은 화면에서는 더 좁게 간격 조정
+    const rowGap = minD < 400 ? 14 : 18;
+    const iconOffset = minD < 400 ? 18 : 24;
     let ly = topStartY; // 보조 버튼 아래
     if (typeof info.ping === 'number') {
       const ping = info.ping;
       ctx.fillStyle = ping < 80 ? '#7fe08a' : ping < 160 ? '#ffd23f' : '#ff6a3d';
-      ctx.font = '12px sans-serif';
-      ctx.fillText(t('ping', { n: ping }), 16, ly); ly += 18;
+      ctx.font = (minD < 400 ? '11px' : '12px') + ' sans-serif';
+      ctx.fillText(t('ping', { n: ping }), leftPad, ly); ly += rowGap;
     }
     if (self) {
-      drawIcon(ctx, 'coin', 24, ly - 4, 14, '#ffd23f');
-      ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 13px sans-serif';
-      ctx.fillText(t('coins', { n: self.coins }), 36, ly); ly += 20;
+      drawIcon(ctx, 'coin', leftPad + iconOffset, ly - 4, 14, '#ffd23f');
+      ctx.fillStyle = '#ffd23f'; ctx.font = (minD < 400 ? 'bold 12px' : 'bold 13px') + ' sans-serif';
+      ctx.fillText(t('coins', { n: self.coins }), leftPad + iconOffset + 12, ly); ly += rowGap + 2;
     }
     if (self) {
-      ctx.fillStyle = '#ffe27a'; ctx.font = 'bold 14px sans-serif';
-      ctx.fillText(t('killScore', { n: self.score }), 16, ly); ly += 18;
+      ctx.fillStyle = '#ffe27a'; ctx.font = (minD < 400 ? 'bold 13px' : 'bold 14px') + ' sans-serif';
+      ctx.fillText(t('killScore', { n: self.score }), leftPad, ly); ly += rowGap;
       const lb = (info.mode === 'ai') ? (info.aiLeaderboard || []) : (info.leaderboard || []);
       const idx = lb.findIndex((e) => e.id === info.myId);
       if (idx >= 0) {
-        ctx.fillStyle = 'rgba(255,226,122,0.85)'; ctx.font = '12px sans-serif';
-        ctx.fillText(t('myRank', { n: idx + 1 }), 16, ly);
+        ctx.fillStyle = 'rgba(255,226,122,0.85)'; ctx.font = (minD < 400 ? '11px' : '12px') + ' sans-serif';
+        ctx.fillText(t('myRank', { n: idx + 1 }), leftPad, ly);
       }
     }
   } else {
@@ -98,36 +103,69 @@ export function drawHUD(ctx, W, H, info) {
 function drawMobileStatus(ctx, W, self, snap) {
   const minD = Math.min(W, H);
   // 작은 화면에서는 더 작은 체력바, 큰 화면에서는 넉넉하게
-  const hbW = Math.min(280, Math.max(180, W * (minD < 500 ? 0.45 : 0.55)));
-  const hbH = minD < 500 ? 14 : 16;
-  // 중앙 카운터(레벨/생존) 아래 - 작은 화면에서는 더 위로
-  const bx = (W - hbW) / 2, by = minD < 500 ? 58 : 72;
+  const hbW = Math.min(280, Math.max(160, W * (minD < 500 ? 0.42 : 0.55)));
+  const hbH = minD < 500 ? 12 : 16;
+  // 중앙 카운터(레벨/생존) 아래
+  const by = minD < 500 ? 56 : 72;
+  const bx = (W - hbW) / 2;
   const hpct = clamp(self.health / self.maxHealth, 0, 1);
   const lowHP = hpct < 0.3;
   const pulse = lowHP ? (0.5 + 0.5 * Math.sin((snap.time || 0) * 8)) : 0;
+
+  // 체력바 배경
   ctx.fillStyle = 'rgba(0,0,0,0.55)'; roundRect(ctx, bx - 6, by - 6, hbW + 12, hbH + 12, 8); ctx.fill();
   ctx.fillStyle = '#3a0d0d'; roundRect(ctx, bx, by, hbW, hbH, 5); ctx.fill();
+
+  // 체력바 채움 (그라데이션 효과)
   const hcol = hpct > 0.5 ? CONFIG.COLORS.healthGood : (hpct > 0.25 ? '#ffd23f' : CONFIG.COLORS.healthBad);
   if (lowHP) { ctx.save(); ctx.shadowColor = hcol; ctx.shadowBlur = 5 + 6 * pulse; }
   ctx.fillStyle = hcol; roundRect(ctx, bx, by, Math.max(0, hbW * hpct), hbH, 5); ctx.fill();
   if (lowHP) ctx.restore();
+
+  // 체력바 하이라이트
   ctx.fillStyle = 'rgba(255,255,255,0.25)'; roundRect(ctx, bx, by, Math.max(0, hbW * hpct), hbH * 0.5, 5); ctx.fill();
-  ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+
+  // 체력 수치 텍스트
+  ctx.fillStyle = '#fff'; ctx.font = (minD < 500 ? 'bold 10px' : 'bold 11px') + ' sans-serif'; ctx.textAlign = 'center';
   ctx.fillText(Math.ceil(self.health) + ' / ' + self.maxHealth, bx + hbW / 2, by + hbH - 2);
+
   // 탄약(체력바 아래 중앙) — 무기 아이콘 + 수치
   const w = WEAPONS[self.weaponKey] || WEAPONS.pistol;
   const wkey = self.weaponKey || 'pistol';
   const wcol = wkey === 'smg' ? '#7fc4ff' : (wkey === 'shotgun' ? '#ff8a5d' : '#ffd23f');
-  const ammoY = by + hbH + (minD < 500 ? 14 : 18);
+  const ammoY = by + hbH + (minD < 500 ? 12 : 18);
   const label = self.reloadTimer > 0 ? t('reloading') : (self.ammo + '/' + w.magSize);
-  ctx.font = 'bold 13px sans-serif';
+  const fontSize = minD < 500 ? 'bold 12px' : 'bold 13px';
+  ctx.font = fontSize + ' sans-serif';
   const tw = ctx.measureText(label).width;
   const iconX = W / 2 - tw / 2 - 12;
-  drawIcon(ctx, (wkey === 'smg' || wkey === 'shotgun' || wkey === 'pistol') ? wkey : 'weapon', iconX, ammoY - 4, 15,
-    self.reloadTimer > 0 ? '#ffd23f' : wcol);
-  ctx.fillStyle = self.reloadTimer > 0 ? '#ffd23f' : '#fff';
+  const iconSize = minD < 500 ? 13 : 15;
+
+  // 재장전 시 노란색 깜빡임 효과
+  const reloading = self.reloadTimer > 0;
+  if (reloading) {
+    ctx.save();
+    ctx.globalAlpha = 0.5 + 0.5 * Math.sin((snap.time || 0) * 12);
+  }
+  drawIcon(ctx, (wkey === 'smg' || wkey === 'shotgun' || wkey === 'pistol') ? wkey : 'weapon',
+    iconX, ammoY - 4, iconSize, reloading ? '#ffd23f' : wcol);
+  if (reloading) ctx.restore();
+
+  ctx.fillStyle = reloading ? '#ffd23f' : '#fff';
   ctx.textAlign = 'left';
   ctx.fillText(label, iconX + 11, ammoY);
+
+  // 수류탄 보유 표시 (체력바 오른쪽)
+  if (self.grenadeCount > 0) {
+    const gx = bx + hbW + 12;
+    const gy = by + hbH / 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath(); ctx.arc(gx, gy, 10, 0, TAU); ctx.fill();
+    drawIcon(ctx, 'grenade', gx, gy, 12, '#ff8a5d');
+    ctx.fillStyle = '#fff'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(String(self.grenadeCount), gx, gy + 14);
+  }
+
   ctx.textAlign = 'center';
 }
 
@@ -200,7 +238,7 @@ function drawMinimap(ctx, W, snap, self, touch) {
   const pad = minD < 500 ? 12 : 16;
   const mx = W - size - pad, my = pad;
   const scale = size / worldSize;
-  // 프레임
+  // 프레임 (더 두꺼운 테두리)
   ctx.fillStyle = 'rgba(10,14,20,0.7)'; roundRect(ctx, mx - 3, my - 3, size + 6, size + 6, 11); ctx.fill();
   ctx.fillStyle = 'rgba(0,0,0,0.45)'; roundRect(ctx, mx, my, size, size, 8); ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 2; roundRect(ctx, mx, my, size, size, 8); ctx.stroke();
@@ -210,6 +248,7 @@ function drawMinimap(ctx, W, snap, self, touch) {
   ctx.fillStyle = 'rgba(181,30,30,0.12)'; ctx.fill();
   ctx.strokeStyle = CONFIG.COLORS.zoneStroke; ctx.lineWidth = 1.5; ctx.stroke();
   // 엔티티(나=방향 화살표, 봇=주황 점, 인간=파랑 점)
+  const dotSize = touch ? (minD < 400 ? 1.8 : 2.2) : 2.2;
   for (const e of snap.entities) {
     if (!e.alive) continue;
     const ex = mx + e.x * scale, ey = my + e.y * scale;
@@ -220,7 +259,7 @@ function drawMinimap(ctx, W, snap, self, touch) {
       ctx.restore();
     } else {
       ctx.fillStyle = e.isBot ? '#ff6a3d' : '#5db0ff';
-      ctx.beginPath(); ctx.arc(ex, ey, 2.2, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex, ey, dotSize, 0, TAU); ctx.fill();
     }
   }
 }

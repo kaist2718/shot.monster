@@ -83,6 +83,11 @@ export const TouchCtrl = {
   _casualTapActive: false,
   _casualTarget: null,
   _grenadeId: null, // 수류탄 버튼 터치 ID
+  _quickChatId: null, // 퀵챗 버튼 터치 ID
+  _quickChatOpen: false, // 퀵챗 패널 열림 상태
+  _pingStartTime: 0, // 핑 롱프레스 시작 시간
+  _pingStarted: false, // 핑 진행 중
+  _pingTouchId: null, // 핑 터치 ID
 
   init(canvas, camera, opts = {}) {
     this._canvas = canvas;
@@ -91,6 +96,7 @@ export const TouchCtrl = {
     this._onSwitchWeapon = opts.onSwitchWeapon || null;
     this._onThrowGrenade = opts.onThrowGrenade || null;
     this._onMapPing = opts.onMapPing || null;
+    this._onEmote = opts.onEmote || null;
     Input.touch.enabled = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
     if (!Input.touch.enabled) return;
     this._refreshSafe();
@@ -189,6 +195,8 @@ export const TouchCtrl = {
     this.buttonBoard   = { x: sX + sGap * 2, y: sY, r: r2 };
     this.buttonOrient  = { x: sX + sGap * 3, y: sY, r: r2 };
     this.buttonSettings= { x: sX + sGap * 4, y: sY, r: r2 };
+    // 퀵챗 버튼 (상단 우측 보조줄)
+    this.buttonQuickChat = { x: sX + sGap * 5, y: sY, r: r2 };
 
     this._btnR = r1;
     this._lefty = lefty;
@@ -266,6 +274,18 @@ export const TouchCtrl = {
       if (this._inButton(t, this.buttonSettings)){ SettingsPanel.toggle(); continue; }
       if (this._inButton(t, this.buttonOrient))  { if (this._onOrient) this._onOrient(); continue; }
       if (this._inButton(t, this.buttonBoard))   { this._boardOpen = !this._boardOpen; Input.touch.boardOpen = this._boardOpen; continue; }
+      if (this._inButton(t, this.buttonQuickChat)) {
+        this._toggleQuickChat();
+        continue;
+      }
+
+      // 미니맵 영역 확인 (우상단) - 롱프레스로 핑
+      if (this._onMapPing && this._isInMinimap(t.clientX, t.clientY)) {
+        this._pingTouchId = t.identifier;
+        this._pingStartTime = performance.now();
+        this._pingStarted = false;
+        continue;
+      }
 
       if (!combat) continue; // 사망 중 전투 입력 무시
 
@@ -320,6 +340,16 @@ export const TouchCtrl = {
     for (const t of e.changedTouches) {
       if (t.identifier === this._moveId) { this._moveCX = t.clientX; this._moveCY = t.clientY; }
       else if (t.identifier === this._aimId) { this._aimCX = t.clientX; this._aimCY = t.clientY; }
+      // 핑 롱프레스 체크
+      else if (t.identifier === this._pingTouchId && !this._pingStarted) {
+        if (performance.now() - this._pingStartTime > 300) {
+          this._pingStarted = true;
+          this._doPing(t.clientX, t.clientY);
+          if (typeof navigator.vibrate === 'function') {
+            try { navigator.vibrate(20); } catch { /* 무시 */ }
+          }
+        }
+      }
     }
     this._sync();
   },
@@ -344,6 +374,14 @@ export const TouchCtrl = {
       else if (t.identifier === this._fireId)    { this._fireId = null; }
       else if (t.identifier === this._moveId)    { this._moveId = null; this._sprintLatched = false; }
       else if (t.identifier === this._aimId)     { this._aimId = null; this._aimLatched = false; }
+      else if (t.identifier === this._pingTouchId) {
+        if (!this._pingStarted && this._onMapPing) {
+          // 짧은 탭 = 여기 핑
+          this._doPing(t.clientX, t.clientY);
+        }
+        this._pingTouchId = null;
+        this._pingStarted = false;
+      }
     }
 
     // 캐주얼 모드: 터치 종료 → 이동 목표 유지 (움직임 지속)
@@ -446,28 +484,27 @@ export const TouchCtrl = {
       const dy = this._casualTarget.y - self.y;
       const distToTarget = Math.hypot(dx, dy);
 
-      if (distToTarget > 30) {
+      if (distToTarget > 25) {
         t.moveX = clamp(dx / distToTarget, -1, 1);
         t.moveY = clamp(dy / distToTarget, -1, 1);
       } else {
         t.moveX = 0;
         t.moveY = 0;
+        // 목표 도달 시 타겟 클리어 (main.js 에서도 처리하지만 여기서도 처리)
+        this._casualTarget = null;
       }
 
-      // 자동 조준: 탭 위치 근처 적 또는 가장 가까운 적 찾기
+      // 자동 조준: 가장 가까운 적 찾기 (봇/인간 모두)
       if (MobileSettings.get('aimAssist')) {
-        // 먼저 탭 위치 근처 적 찾기
-        const targetNearest = this._findTargetEnemy(entities, this._casualTarget, myId, self);
-        // 없으면 가장 가까운 적
-        const nearest = targetNearest || this._findNearestEnemy(entities, myId, self);
+        const nearest = this._findNearestEnemy(entities, myId, self);
         if (nearest) {
           const aimAng = Math.atan2(nearest.y - self.y, nearest.x - self.x);
           t.aimX = Math.cos(aimAng);
           t.aimY = Math.sin(aimAng);
           t.aiming = true;
 
-          // 자동 사격: 적이 화면 내에 있으면 사격 (사거리 내)
-          const shootRange = 420;
+          // 자동 사격: 적이 사거리 내에 있으면 사격
+          const shootRange = 430;
           if (MobileSettings.get('autoFire') && dist(nearest.x, nearest.y, self.x, self.y) < shootRange) {
             t.firing = true;
           } else {
@@ -478,7 +515,15 @@ export const TouchCtrl = {
           t.firing = false;
         }
       } else {
-        t.aiming = false;
+        // aimAssist 없을 때: 이동 방향으로 조준
+        const moveLen = Math.hypot(t.moveX, t.moveY);
+        if (moveLen > 0.1) {
+          t.aimX = t.moveX;
+          t.aimY = t.moveY;
+          t.aiming = true;
+        } else {
+          t.aiming = false;
+        }
         t.firing = false;
       }
     } else {
@@ -496,30 +541,13 @@ export const TouchCtrl = {
     let nearest = null;
     let minDist = Infinity;
 
-    // 사거리 내 모든 적을 찾되, 무기 별 사거리 적용
-    const shootRange = 430; // BOT_SHOOT_RANGE와 일치
+    // 사거리 내 모든 적 (봇 + 인간 모두 타겟)
+    const shootRange = 430;
     for (const e of entities) {
-      if (e.id === myId || !e.alive || e.isBot === false) continue; // 적(봇)만 타겟
+      if (e.id === myId || !e.alive) continue;
+      // 모든 생존 엔티티를 적으로 간주 (봇/인간 구분 없음)
       const d = dist(e.x, e.y, self.x, self.y);
       if (d < minDist && d < shootRange) {
-        minDist = d;
-        nearest = e;
-      }
-    }
-    return nearest;
-  },
-
-  // 화면 탭 위치 근처 적 찾기 (캐주얼 모드용)
-  _findTargetEnemy(entities, target, myId, self) {
-    if (!target || !self) return null;
-    let nearest = null;
-    let minDist = Infinity;
-    const tapRange = 180; // 탭 위치 반경 180px 내 적 타겟
-
-    for (const e of entities) {
-      if (e.id === myId || !e.alive || e.isBot === false) continue;
-      const d = dist(e.x, e.y, target.x, target.y);
-      if (d < minDist && d < tapRange) {
         minDist = d;
         nearest = e;
       }
@@ -535,6 +563,95 @@ export const TouchCtrl = {
       x: clientX / z + camera.x,
       y: clientY / z + camera.y
     };
+  },
+
+  // 미니맵 영역 확인 (우상단)
+  _isInMinimap(clientX, clientY) {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const minD = Math.min(W, H);
+    const isLandscape = W > H;
+    const size = minD < 450 ? 80 : (isLandscape ? 96 : 104);
+    const pad = minD < 500 ? 12 : 16;
+    const mx = W - size - pad;
+    const my = pad;
+    return clientX >= mx && clientX <= mx + size &&
+           clientY >= my && clientY <= my + size;
+  },
+
+  // 미니맵 좌표 → 월드 좌표로 변환하여 핑 전송
+  _doPing(clientX, clientY) {
+    if (!this._camera || !this._onMapPing) return;
+    const W = window.innerWidth;
+    const minD = Math.min(W, window.innerHeight);
+    const isLandscape = W > window.innerHeight;
+    const size = minD < 450 ? 80 : (isLandscape ? 96 : 104);
+    const pad = minD < 500 ? 12 : 16;
+    const mx = W - size - pad;
+    const my = pad;
+    const worldSize = 2400;
+    const scale = size / worldSize;
+    const wx = (clientX - mx) / scale;
+    const wy = (clientY - my) / scale;
+    this._onMapPing(wx, wy, 'here');
+  },
+
+  // 퀵챗 패널 토글
+  _toggleQuickChat() {
+    this._quickChatOpen = !this._quickChatOpen;
+    if (!this._quickChatOpen) {
+      this._removeQuickChatPanel();
+    }
+  },
+
+  _removeQuickChatPanel() {
+    const el = document.getElementById('quickchat-panel');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  },
+
+  _showQuickChatPanel() {
+    this._removeQuickChatPanel();
+    const panel = document.createElement('div');
+    panel.id = 'quickchat-panel';
+    panel.style.cssText =
+      'position:fixed;bottom:50%;left:50%;transform:translate(-50%,50%);z-index:105;' +
+      'display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:240px;' +
+      'padding:14px;background:rgba(20,24,30,0.95);border-radius:14px;' +
+      'border:1px solid rgba(255,255,255,0.12);box-shadow:0 8px 32px rgba(0,0,0,0.5);';
+
+    const emotes = ['hello', 'thanks', 'gg', 'sorry', 'help'];
+    const emojiMap = { hello: '👋', thanks: '👍', gg: '👏', sorry: '🙏', help: '🆘' };
+    for (const type of emotes) {
+      const btn = document.createElement('button');
+      btn.style.cssText =
+        'width:44px;height:44px;border:none;border-radius:10px;' +
+        'background:rgba(255,255,255,0.08);color:#fff;font-size:22px;cursor:pointer;' +
+        'transition:background 0.1s;';
+      btn.textContent = emojiMap[type] || '👋';
+      btn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Net.sendEmote 호출 (main.js import 필요 - 직접 호출)
+        this._onEmote && this._onEmote(type);
+        this._toggleQuickChat();
+      });
+      panel.appendChild(btn);
+    }
+
+    document.body.appendChild(panel);
+  },
+
+  // 퀵챗 그리기 (보조 버튼 영역)
+  _drawQuickChat(ctx, button) {
+    if (!button) return;
+    const r = button.r;
+    ctx.save();
+    ctx.fillStyle = this._quickChatOpen ? 'rgba(255,210,63,0.8)' : 'rgba(0,0,0,0.42)';
+    ctx.beginPath(); ctx.arc(button.x, button.y, r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.40)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
+    // 채팅 아이콘 (말풍선)
+    drawIcon(ctx, 'chat', button.x, button.y, r * 1.2, this._quickChatOpen ? '#20242b' : '#fff');
   },
 
   endFrame() { Input.touch.reloadEdge = false; },
@@ -567,6 +684,7 @@ export const TouchCtrl = {
       this._drawButton(ctx, this.buttonBoard,   'board',   this._boardOpen, 'minor');
       this._drawButton(ctx, this.buttonOrient,  'orient',  false, 'minor');
       this._drawButton(ctx, this.buttonSettings,'settings', SettingsPanel.isOpen(), 'minor');
+      this._drawQuickChat(ctx, this.buttonQuickChat);
     }
 
     // 수류탄 버튼 (생존자 + 보유 수류탄 있음)
@@ -629,28 +747,45 @@ export const TouchCtrl = {
     const z = this._camera.zoom;
     const x = (target.x - this._camera.x) * z;
     const y = (target.y - this._camera.y) * z;
-    const radius = 22;
+    const radius = Math.max(18, 22 * z);
 
-    // 링 표시
+    // 펄스 글로우
+    const pulse = 0.6 + 0.4 * Math.sin(performance.now() * 0.005);
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,210,63,0.8)';
+    ctx.shadowColor = 'rgba(255,210,63,0.6)';
+    ctx.shadowBlur = 8 + 6 * pulse;
+
+    // 외부 링
+    ctx.strokeStyle = `rgba(255,210,63,${0.5 + 0.3 * pulse})`;
     ctx.lineWidth = 3;
+    ctx.setLineDash([6, 4]);
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, TAU);
     ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 내부 링
+    ctx.strokeStyle = 'rgba(255,210,63,0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 0.6, 0, TAU);
+    ctx.stroke();
 
     // 중심 점
-    ctx.fillStyle = 'rgba(255,210,63,0.9)';
+    ctx.fillStyle = 'rgba(255,210,63,0.95)';
     ctx.beginPath();
     ctx.arc(x, y, 4, 0, TAU);
     ctx.fill();
 
-    // 방향 표시 화살표
-    ctx.strokeStyle = 'rgba(255,210,63,0.6)';
-    ctx.lineWidth = 2;
+    // 크로스 헤어
+    ctx.strokeStyle = 'rgba(255,210,63,0.5)';
+    ctx.lineWidth = 1.5;
+    const ch = radius + 6;
     ctx.beginPath();
-    ctx.moveTo(x, y - radius + 6);
-    ctx.lineTo(x, y - radius - 6);
+    ctx.moveTo(x, y - ch); ctx.lineTo(x, y - radius + 4);
+    ctx.moveTo(x, y + ch); ctx.lineTo(x, y + radius - 4);
+    ctx.moveTo(x - ch, y); ctx.lineTo(x - radius + 4, y);
+    ctx.moveTo(x + ch, y); ctx.lineTo(x + radius - 4, y);
     ctx.stroke();
     ctx.restore();
   },
@@ -672,12 +807,19 @@ export const TouchCtrl = {
     const hx = ox + dx * k, hy = oy + dy * k;
     const mag = cap / this.maxRadius;
     const sprinting = (kind === 'move') && (this._sprintLatched || (this._runToggle && MobileSettings.get('runButton')));
+    const isMove = kind === 'move';
+    const baseColor = sprinting ? '#ffd23f' : 'rgba(255,255,255,0.55)';
+    const activeColor = sprinting ? '#ffd23f' : 'rgba(255,255,255,0.85)';
+
+    // 외부 링 (베이스)
     ctx.save();
     if (sprinting) { ctx.shadowColor = 'rgba(255,210,63,0.9)'; ctx.shadowBlur = 12; }
     ctx.strokeStyle = sprinting ? 'rgba(255,210,63,0.75)' : 'rgba(255,255,255,0.30)';
     ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(ox, oy, this.maxRadius, 0, TAU); ctx.stroke();
     ctx.restore();
+
+    // 방향 호 표시 (움직임 방향)
     if (mag > 0.02) {
       ctx.save();
       const ang = Math.atan2(dy, dx);
@@ -686,17 +828,30 @@ export const TouchCtrl = {
       ctx.beginPath(); ctx.arc(ox, oy, this.maxRadius, ang - 0.5, ang + 0.5); ctx.stroke();
       ctx.restore();
     }
+
+    // 내부 조이스틱 노브
     const padR = this.maxRadius * 0.44;
     const grad = ctx.createRadialGradient(hx - padR * 0.3, hy - padR * 0.3, padR * 0.1, hx, hy, padR);
-    grad.addColorStop(0, 'rgba(255,255,255,0.85)');
-    grad.addColorStop(1, 'rgba(255,255,255,0.40)');
+    grad.addColorStop(0, sprinting ? 'rgba(255,210,63,0.95)' : 'rgba(255,255,255,0.9)');
+    grad.addColorStop(1, sprinting ? 'rgba(255,210,63,0.55)' : 'rgba(255,255,255,0.40)');
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(hx, hy, padR, 0, TAU); ctx.fill();
+
+    // 방향 화살표 (조이스틱 내부)
     if (mag > 0.12) {
       const a = Math.atan2(dy, dx);
       ctx.save(); ctx.translate(hx, hy); ctx.rotate(a);
-      ctx.fillStyle = 'rgba(40,44,52,0.85)';
+      ctx.fillStyle = sprinting ? '#20242b' : 'rgba(40,44,52,0.85)';
       ctx.beginPath(); ctx.moveTo(padR * 0.5, 0); ctx.lineTo(-padR * 0.25, -padR * 0.32); ctx.lineTo(-padR * 0.25, padR * 0.32); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+
+    // 이동 스틱: 강도 표시 링 (데드존 이상에서만)
+    if (isMove && mag > 0.05) {
+      ctx.save();
+      ctx.strokeStyle = sprinting ? 'rgba(255,210,63,0.3)' : 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(ox, oy, this.maxRadius * 0.3 + this.maxRadius * 0.55 * mag, 0, TAU); ctx.stroke();
       ctx.restore();
     }
   },
@@ -705,24 +860,32 @@ export const TouchCtrl = {
     if (!b) return;
     const r = b.r;
     const isMinor = kind === 'minor';
+    const isFire = kind === 'fire';
+    const isRun = kind === 'run';
     ctx.save();
-    if (pressed) { ctx.shadowColor = kind === 'fire' ? 'rgba(255,80,60,0.9)' : 'rgba(255,210,63,0.9)'; ctx.shadowBlur = 12; }
-    const baseCol = kind === 'fire' ? 'rgba(220,60,50,0.85)'
-      : kind === 'run' ? (pressed ? 'rgba(255,210,63,0.85)' : 'rgba(80,150,90,0.7)')
+    // 프레스 시 글로우 효과
+    if (pressed) {
+      ctx.shadowColor = isFire ? 'rgba(255,80,60,0.9)' : 'rgba(255,210,63,0.9)';
+      ctx.shadowBlur = 12;
+    }
+    const baseCol = isFire ? 'rgba(220,60,50,0.85)'
+      : isRun ? (pressed ? 'rgba(255,210,63,0.85)' : 'rgba(80,150,90,0.7)')
       : isMinor ? (pressed ? 'rgba(255,210,63,0.8)' : 'rgba(0,0,0,0.42)')
       : (pressed ? 'rgba(255,210,63,0.85)' : 'rgba(20,24,30,0.6)');
     const pr = pressed ? r * 1.06 : r;
     const grad = ctx.createRadialGradient(b.x - pr * 0.3, b.y - pr * 0.3, pr * 0.1, b.x, b.y, pr);
-    grad.addColorStop(0, kind === 'fire' ? 'rgba(255,120,100,0.95)' : 'rgba(255,255,255,0.18)');
+    grad.addColorStop(0, isFire ? 'rgba(255,120,100,0.95)' : (pressed ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.18)'));
     grad.addColorStop(1, baseCol);
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(b.x, b.y, pr, 0, TAU); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.40)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = pressed ? (isFire ? 'rgba(255,180,160,0.8)' : 'rgba(255,210,63,0.7)') : 'rgba(255,255,255,0.40)';
+    ctx.lineWidth = pressed ? 2.5 : 2;
+    ctx.stroke();
     ctx.restore();
-    // 벡터 아이콘(가독성: 밝은 색, 살짝 큰 글리프)
+    // 벡터 아이콘
     const iconCol = pressed
-      ? (kind === 'run' || kind === 'fire' ? '#20242b' : '#20242b')
-      : (kind === 'fire' ? '#fff' : '#fff');
+      ? (isRun || isFire ? '#20242b' : '#20242b')
+      : (isFire ? '#fff' : '#fff');
     drawIcon(ctx, iconName, b.x, b.y, r * 1.15, iconCol);
   },
 };
