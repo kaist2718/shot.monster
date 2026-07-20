@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-2.2-blue.svg)
+![Version](https://img.shields.io/badge/version-2.3-blue.svg)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green.svg)
 ![Socket.io](https://img.shields.io/badge/socket.io-4.x-black.svg)
 ![License](https://img.shields.io/badge/license-MIT-yellow.svg)
@@ -286,13 +286,19 @@ npm start          # = node server.js  → http://localhost:3000
 
 > 서버는 `{moveX, moveY, angle, firing, reload, sprint}` 입력만 수신하므로 **서버 권위적 보안을 유지**합니다.
 
-#### 최근 개선 사항 (v2.2)
+#### 개선 사항 (v2.2 ~ v2.3)
 | 개선 | 설명 |
 |------|------|
 | ✅ **터치 응답성 개선** | 터치 즉시 이동 시작 (기존 1~2프레임 지연 해결) |
 | ✅ **정확한 무기 전환** | `Net.sendSwitchWeapon(key)` 직접 호출로 원하는 무기로 즉시 전환 |
-| ✅ **장애물 회피** | 장애물 감지 시 자동 우회 (선호→스트레이프→원래 방향) |
+| ✅ **장애물 회피** | 장애물 감지 시 자동 우회 (선호→스트레이프→원래 방향) + 방향 캐싱으로 지터 제거 |
 | ✅ **정확한 존 중심** | 서버의 실제 존 중심 좌표 사용 (고정 중심→동적 중심) |
+| ✅ **부드러운 움직임** | 지수 평활화 이동(0.35) + 프레임 카운터 기반 스트레이프로 마이크로지터 제거 |
+| ✅ **안정적인 타겟팅** | 타겟 락으로 빠른 전환 방지 + 조준 방향 평활화로 에임 떨림 제거 |
+| ✅ **존 회피 안정화** | 히스테리시스 임계값(120px/180px)으로 플립플랍 방지 |
+| ✅ **멀티페이지 튜토리얼** | 시작 화면에 이전/다음/건너뛰기 + 페이지 도트, 모바일/데스크탑 분기 콘텐츠 |
+| ✅ **맞춤형 HUD 힌트** | 게임 첫 10초간 조작 체계별 컨텍스트 힌트 표시 |
+| ✅ **첫 방문 자동 튜토리얼** | `localStorage` 플래그 기반 첫 방문 시 600ms 후 자동 표시 |
 
 ### 미니맵 핑 시스템
 
