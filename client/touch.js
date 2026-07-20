@@ -555,18 +555,15 @@ export const TouchCtrl = {
 
     if (!self || !self.alive || !t.active) {
       // 터치가 없거나 플레이어가 죽었으면 정지
-      this._smoothMoveX = 0; this._smoothMoveY = 0;
+      // 속도/크기 초기화 (angular smoothing+speed envelope 방식)
+      this._moveSpeed = 0;
+      this._smoothMag = 0;
       t.moveX = 0; t.moveY = 0; t.aiming = false; t.firing = false; t.sprint = false;
       return;
     }
 
     const ONEHAND = CONFIG.CONTROLS.ONEHAND;
     const aggression = MobileSettings.get('onehandAggressiveness') || 0.7;
-    // 이동 smoothing 계수: 높을수록 반응 빠름, 낮을수록 부드러움
-    const SMOOTH_K = 0.35; // 0.30 → 0.35로 증가 (반응성 개선)
-    // 스트레이프 페이스: 프레임 카운터 기반으로 자연스러운 좌우 움직임 + 마이크로지터 제거
-    if (this._strafeTimer === undefined) this._strafeTimer = 0;
-    this._strafeTimer = (this._strafeTimer + 1) % 600; // ~10초 주기 (60fps 기준)
     const now = performance.now();
 
     // 1. 최적 타겟 선택 (위협도 기반) — 타겟 락으로 빠른 전환 방지
@@ -688,8 +685,16 @@ export const TouchCtrl = {
           const retreatX = -dx / toTargetLen;
           const retreatY = -dy / toTargetLen;
           // 스트레이프 방향: target.id 기반 시드 + 프레임 카운터로 부드럽게
+          // 스트레이프: 랜덤 지속시간 (2~6초)으로 예측 불가능하게
+          if (this._strafeDuration === undefined) this._strafeDuration = 120 + Math.random() * 240;
+          if (this._strafeFlipFrame === undefined) this._strafeFlipFrame = 0;
+          this._strafeFlipFrame++;
+          if (this._strafeFlipFrame >= this._strafeDuration) {
+            this._strafeDuration = 120 + Math.random() * 240;
+            this._strafeFlipFrame = 0;
+          }
           const strafeSeed = target.id != null ? target.id : 0;
-          const strafePhase = (strafeSeed + Math.floor(this._strafeTimer / 200)) % 2 === 0 ? 1 : -1;
+          const strafePhase = Math.floor(this._strafeFlipFrame / (this._strafeDuration / 2)) % 2 === 0 ? 1 : -1;
           const perpX = -dy / toTargetLen * strafePhase;
           const perpY = dx / toTargetLen * strafePhase;
           rawMoveX = retreatX * 0.3 + perpX * 0.7;
@@ -697,8 +702,16 @@ export const TouchCtrl = {
           shouldSprint = true;
         } else {
           // 적정 거리: 스트레이프 (좌우 움직이며 회피) — 프레임 카운터 기반
+          // 스트레이프: 랜덤 지속시간 (2~6초)으로 예측 불가능하게
+          if (this._strafeDuration === undefined) this._strafeDuration = 120 + Math.random() * 240;
+          if (this._strafeFlipFrame === undefined) this._strafeFlipFrame = 0;
+          this._strafeFlipFrame++;
+          if (this._strafeFlipFrame >= this._strafeDuration) {
+            this._strafeDuration = 120 + Math.random() * 240;
+            this._strafeFlipFrame = 0;
+          }
           const strafeSeed = target.id != null ? target.id : 0;
-          const strafePhase = (strafeSeed + Math.floor(this._strafeTimer / 200)) % 2 === 0 ? 1 : -1;
+          const strafePhase = Math.floor(this._strafeFlipFrame / (this._strafeDuration / 2)) % 2 === 0 ? 1 : -1;
           const perpX = -dy / toTargetLen * strafePhase;
           const perpY = dx / toTargetLen * strafePhase;
           rawMoveX = perpX;
@@ -725,19 +738,48 @@ export const TouchCtrl = {
       }
     }
 
-    // 지수 평활화(Exponential Smoothing)로 부드러운 이동 구현
-    if (this._smoothMoveX === undefined) {
-      this._smoothMoveX = 0;
-      this._smoothMoveY = 0;
+    // === 각도 기반 이동 평활화 (Angular Smoothing) + 속도 포락선 (Speed Envelope) ===
+    // Component-wise smoothing은 방향 전환 시 magnitude가 줄어드는 문제가 있음.
+    // Angular smoothing은 각도를 부드럽게 변화시키면서 magnitude를 보존하여 자연스러운 움직임 구현.
+    
+    const rawAngle = Math.atan2(rawMoveY, rawMoveX);
+    const rawMag = Math.hypot(rawMoveX, rawMoveY);
+    
+    // Smooth state 초기화
+    if (this._smoothMoveAngle === undefined) {
+      this._smoothMoveAngle = rawMag > 0.01 ? rawAngle : (self ? Math.atan2(self.vy || 0, self.vx || 0) : 0);
+      this._smoothMag = 0;
+      this._moveSpeed = 0;
     }
-    this._smoothMoveX += (rawMoveX - this._smoothMoveX) * SMOOTH_K;
-    this._smoothMoveY += (rawMoveY - this._smoothMoveY) * SMOOTH_K;
-    // 미세 움직임이 남아있으면 0으로 클리어
-    if (Math.abs(this._smoothMoveX) < 0.01 && rawMoveX === 0) this._smoothMoveX = 0;
-    if (Math.abs(this._smoothMoveY) < 0.01 && rawMoveY === 0) this._smoothMoveY = 0;
-
-    t.moveX = clamp(this._smoothMoveX, -1, 1);
-    t.moveY = clamp(this._smoothMoveY, -1, 1);
+    
+    // 각도 평활화 (Angular lerp with shortest arc)
+    const ANGLE_SMOOTH_K = 0.20; // 20% per frame → ~5 frames to converge
+    if (rawMag > 0.01) {
+      const diff = Math.atan2(Math.sin(rawAngle - this._smoothMoveAngle), Math.cos(rawAngle - this._smoothMoveAngle));
+      this._smoothMoveAngle += diff * ANGLE_SMOOTH_K;
+    }
+    // rawMag=0이면 마지막 각도 유지 (방향 기억)
+    
+    // 크기 평활화
+    const MAG_SMOOTH_K = 0.30;
+    this._smoothMag += (rawMag - this._smoothMag) * MAG_SMOOTH_K;
+    if (this._smoothMag < 0.01 && rawMag === 0) this._smoothMag = 0;
+    
+    // 속도 포락선: 가속/감속 (급정지/급발진 방지)
+    const ACCEL = 0.06;  // 초당 3.6 → 약 16프레임 만에 최고속도
+    const DECEL = 0.12;  // 초당 7.2 → 약 8프레임 만에 정지 (감속 빠르게)
+    const targetSpeed = clamp(this._smoothMag, 0, 1);
+    if (targetSpeed > this._moveSpeed) {
+      this._moveSpeed = Math.min(this._moveSpeed + ACCEL, targetSpeed);
+    } else if (targetSpeed < this._moveSpeed) {
+      this._moveSpeed = Math.max(this._moveSpeed - DECEL, targetSpeed);
+    }
+    if (this._moveSpeed < 0.005) this._moveSpeed = 0;
+    
+    // 최종 출력: (각도 × 속도)로 벡터 구성
+    const finalMag = this._moveSpeed;
+    t.moveX = Math.cos(this._smoothMoveAngle) * finalMag;
+    t.moveY = Math.sin(this._smoothMoveAngle) * finalMag;
     t.sprint = shouldSprint;
 
     // 4. 자동 무기 전환 (거리 기반)
@@ -755,12 +797,18 @@ export const TouchCtrl = {
       }
     }
 
-    // 5. 자동 사격 — 타겟이 유효 사거리 내에 있으면 사격
+    // 5. 자동 사격 — 히스테리시스로 사거리 경계에서 stutter 방지
     if (target && t.aiming && MobileSettings.get('autoFire') !== false) {
       const d = dist(target.x, target.y, self.x, self.y);
       const effectiveRange = this._getEffectiveRange(self.weaponKey);
-      t.firing = d < effectiveRange;
+      const FIRE_IN = effectiveRange * 0.92;  // 92%: 사격 시작
+      const FIRE_OUT = effectiveRange * 1.03; // 103%: 사격 중단 (히스테리시스)
+      if (this._firingLatched === undefined) this._firingLatched = false;
+      if (!this._firingLatched && d < FIRE_IN) this._firingLatched = true;
+      else if (this._firingLatched && d > FIRE_OUT) this._firingLatched = false;
+      t.firing = this._firingLatched;
     } else {
+      this._firingLatched = false;
       t.firing = false;
     }
 
