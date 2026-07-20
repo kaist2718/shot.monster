@@ -13,6 +13,8 @@ html, body {
   -webkit-tap-highlight-color: transparent;
   position: fixed;       /* 주소창 숨김/당김에 따른 리플로우 방지 */
   inset: 0;
+  /* 다크 모드 강제 — native <select> 드롭다운이 흰 바탕+흰 글자가 되는 현상 방지 */
+  color-scheme: dark;
 }
 
 #game {
@@ -29,6 +31,7 @@ html, body {
 #start-screen, #mode-screen, #room-screen, #settings-screen {
   background: radial-gradient(circle at 50% 28%, rgba(44,50,64,0.97), rgba(14,18,25,0.98));
   animation: overlay-fadein 0.35s ease-out;
+  color-scheme: dark;
 }
 
 @keyframes overlay-fadein {

@@ -82,7 +82,6 @@ export const StartScreen = {
     for (const c of COUNTRIES) {
       const o = document.createElement('option');
       o.value = c.code;
-      o.style.cssText = 'background:#2a2f37;color:#fff;';
       o.dataset.nameKo = c.name;
       o.dataset.nameEn = c.nameEn || c.code;
       sel.appendChild(o);

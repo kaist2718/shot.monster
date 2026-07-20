@@ -84,8 +84,8 @@ export const ModeSelect = {
       return b;
     };
 
-    mkModeBtn('ai', () => t('modeAI'), () => t('modeAIDesc'), '#ffd23f', () => handlers.onAI && handlers.onAI());
-    mkModeBtn('multi', () => t('modeMulti'), () => t('modeMultiDesc'), '#7fc4ff', () => handlers.onMulti && handlers.onMulti());
+    const aiBtn = mkModeBtn('ai', () => t('modeAI'), () => t('modeAIDesc'), '#ffd23f', () => handlers.onAI && handlers.onAI());
+    const multiBtn = mkModeBtn('multi', () => t('modeMulti'), () => t('modeMultiDesc'), '#7fc4ff', () => handlers.onMulti && handlers.onMulti());
 
     root.appendChild(card);
     document.body.appendChild(root);
@@ -118,6 +118,10 @@ export const RoomBrowser = {
     root.style.cssText = ROOT_CSS;
     const card = document.createElement('div');
     card.style.cssText = CARD_CSS + 'width:min(94vw,520px);';
+
+    // 언어 토글 (모드 선택 화면과 동일)
+    const langRow = mkLangRow();
+    card.appendChild(langRow);
 
     const title = document.createElement('div');
     title.style.cssText = 'font-size:22px;font-weight:800;color:#ffd23f;margin-bottom:4px;';
@@ -156,11 +160,13 @@ export const RoomBrowser = {
     this._btns = [quickBtn, playBtn, backBtn];
 
     this._paint = () => {
+      langRow._paint();
       title.textContent = t('roomBrowser');
       sub.textContent = t('modeMultiDesc');
       this._btns.forEach((b) => b._setLabel && b._setLabel());
       this.refresh();
     };
+    langRow._repaint = this._paint;
     this._paint();
   },
   // Net.multiList / Net.roomId 로 목록 재렌더
