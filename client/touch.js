@@ -295,9 +295,8 @@ export const TouchCtrl = {
         if (this._inButton(t, this.buttonWeapon)) { if (this._onSwitchWeapon) this._onSwitchWeapon(); continue; }
         if (this._inButton(t, this.buttonRun))    { this._runToggle = !this._runToggle; continue; }
 
-        // 수류탄 버튼 (듀얼/캐주얼 공통)
-        const grenadeBtn = { x: window.innerWidth - 34 - 16, y: window.innerHeight - 34 - 16, r: 34 };
-        if (this._inButton(t, grenadeBtn) && this._onThrowGrenade) {
+        // 수류탄 버튼 (듀얼/캐주얼 공통) — _getGrenadeBtn()으로 위치 일원화
+        if (this._inButton(t, this._getGrenadeBtn()) && this._onThrowGrenade) {
           this._grenadeId = t.identifier;
           this._onThrowGrenade(t.clientX, t.clientY);
           continue;
@@ -382,17 +381,16 @@ export const TouchCtrl = {
         this._pingTouchId = null;
         this._pingStarted = false;
       }
+      // 수류탄 버튼 터치 종료 (루프 내부에서 처리)
+      if (t.identifier === this._grenadeId) {
+        this._grenadeId = null;
+      }
     }
 
     // 캐주얼 모드: 터치 종료 → 이동 목표 유지 (움직임 지속)
     const scheme = MobileSettings.get('scheme') || 'dual';
     if (scheme === 'casual') {
       this._casualTapActive = false;
-      // 타겟은 유지 - 목표에 도달하거나 새로운 탭까지 지속
-    }
-    // 수류탄 버튼 터치 종료
-    if (t.identifier === this._grenadeId) {
-      this._grenadeId = null;
     }
     this._sync();
   },
@@ -719,18 +717,15 @@ export const TouchCtrl = {
     ctx.restore();
   },
 
-  // 수류탄 버튼 (캐주얼/듀얼 모두)
+  // 수류탄 버튼 (캐주얼/듀얼 모두) — _getGrenadeBtn()으로 위치 일원화
   _drawGrenadeButton(ctx, hasGrenade) {
     if (!hasGrenade) return;
-    const W = window.innerWidth;
-    const btnR = 34;
-    const x = W - btnR - 16 - (this._safe?.right || 0);
-    const y = window.innerHeight - btnR - 16 - (this._safe?.bottom || 0);
+    const btn = this._getGrenadeBtn();
 
     ctx.save();
     ctx.fillStyle = 'rgba(220,60,50,0.75)';
     ctx.beginPath();
-    ctx.arc(x, y, btnR, 0, TAU);
+    ctx.arc(btn.x, btn.y, btn.r, 0, TAU);
     ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,0.4)';
     ctx.lineWidth = 2;
@@ -738,7 +733,7 @@ export const TouchCtrl = {
     ctx.restore();
 
     // 아이콘
-    drawIcon(ctx, 'grenade', x, y, btnR * 0.7, '#fff');
+    drawIcon(ctx, 'grenade', btn.x, btn.y, btn.r * 0.7, '#fff');
   },
 
   // 캐주얼 모드 타겟 마커 (스크린 좌표로 변환)

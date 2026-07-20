@@ -7,9 +7,22 @@
 // ============================================================
 
 import { Input } from './input.js';
+import { MobileSettings } from './mobile.js';
 
-// 모바일(터치) 여부에 따라 데스크탑/모바일 파티클 수 선택
-function pcount(desktop, mobile) { return Input.touch.enabled ? mobile : desktop; }
+// 품질 설정에 따라 파티클 수 선택
+// 우선순위: quality 설정 > 터치 여부
+function pcount(desktop, mobile) {
+  const quality = MobileSettings.get('quality');
+  if (quality === 'low') return Math.ceil(mobile * 0.5);
+  if (quality === 'med') return Math.ceil((desktop + mobile) / 2);
+  // 'high' or default
+  return Input.touch.enabled ? mobile : desktop;
+}
+
+// 파티클 효과 활성화 여부
+export function particlesEnabled() {
+  return MobileSettings.get('particles') !== false;
+}
 
 export class Particles {
   constructor() { this.items = []; this._fontCache = new Map(); }

@@ -84,8 +84,8 @@ export const ModeSelect = {
       return b;
     };
 
-    const aiBtn = mkModeBtn('ai', () => t('modeAI'), () => t('modeAIDesc'), '#ffd23f', () => handlers.onAI && handlers.onAI());
-    const multiBtn = mkModeBtn('multi', () => t('modeMulti'), () => t('modeMultiDesc'), '#7fc4ff', () => handlers.onMulti && handlers.onMulti());
+    mkModeBtn('ai', () => t('modeAI'), () => t('modeAIDesc'), '#ffd23f', () => handlers.onAI && handlers.onAI());
+    mkModeBtn('multi', () => t('modeMulti'), () => t('modeMultiDesc'), '#7fc4ff', () => handlers.onMulti && handlers.onMulti());
 
     root.appendChild(card);
     document.body.appendChild(root);

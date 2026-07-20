@@ -39,7 +39,6 @@ let worldObstacles = [];
 let predictedSelf = null;
 let lastContract = { moveX: 0, moveY: 0, angle: 0, firing: false, reload: false, sprint: false };
 let stickyReload = false;       // 전송될 때까지 유지
-let stickyFireRise = false;     // 반자동 엣지 보완(참고용, server도 edge)
 let prevFiringLocal = false;
 let frameDt = 1 / 60;
 
@@ -538,8 +537,6 @@ function step(ts) {
   // rAF마다 최신 입력으로 예측/조준 — 30Hz 샘플 지연 제거
   if (!pageHidden) {
     lastContract = buildContract();
-    // fire rise 추적(향후 로컬 건 고스트용)
-    if (lastContract.firing && !prevFiringLocal) stickyFireRise = true;
     prevFiringLocal = !!lastContract.firing;
   }
 

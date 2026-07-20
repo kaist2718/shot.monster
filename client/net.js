@@ -64,7 +64,7 @@ export const Net = {
     this.socket.on('emote', (e) => cb.onEmote && cb.onEmote(e));
     this.socket.on('leaderboard', (lb) => { this.leaderboard = lb || []; cb.onLeaderboard && cb.onLeaderboard(lb); });
     this.socket.on('aiLeaderboard', (lb) => { this.aiLeaderboard = lb || []; cb.onAILeaderboard && cb.onAILeaderboard(lb); });
-    this.socket.on('countryBoard', (cb2) => { this.countryBoard = cb2 || []; });
+    this.socket.on('countryBoard', (data) => { this.countryBoard = data || []; });
     this.socket.on('multiList', (list) => { this.multiList = list || []; cb.onMultiList && cb.onMultiList(list); });
 
     if (this._pingTimer) clearInterval(this._pingTimer); // init 재호출 시 누적 방지
