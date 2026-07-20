@@ -12,16 +12,13 @@ import { MobileSettings } from './mobile.js';
 // 품질 설정에 따라 파티클 수 선택
 // 우선순위: quality 설정 > 터치 여부
 function pcount(desktop, mobile) {
-  const quality = MobileSettings.get('quality');
-  if (quality === 'low') return Math.ceil(mobile * 0.5);
-  if (quality === 'med') return Math.ceil((desktop + mobile) / 2);
-  // 'high' or default
-  return Input.touch.enabled ? mobile : desktop;
-}
-
-// 파티클 효과 활성화 여부
-export function particlesEnabled() {
-  return MobileSettings.get('particles') !== false;
+  try {
+    const quality = MobileSettings.get('quality');
+    if (quality === 'low') return Math.ceil(mobile * 0.5);
+    if (quality === 'med') return Math.ceil((desktop + mobile) / 2);
+  } catch { /* quality 설정 무시, 기본값 사용 */ }
+  // 'high' or default - Input.touch는 touch.js에서 설정되므로 안전하게 체크
+  return (Input.touch && Input.touch.enabled) ? mobile : desktop;
 }
 
 export class Particles {
@@ -130,7 +127,7 @@ export class Particles {
         color: 'rgba(100,100,100,0.6)', grav: 20,
       });
     }
-  },
+  }
 
   // 뜨는 데미지 숫자
   damageText(x, y, amount, isMe) {

@@ -24,6 +24,13 @@
 
   <link rel="stylesheet" href="css/style.css">
 
+  <!-- 부트 스플래시 폴백: main.js 로드 실패 시 5초 후 자동 제거 -->
+  <script>
+    setTimeout(function(){
+      var s = document.getElementById('boot-splash');
+      if(s){ s.classList.add('hidden'); setTimeout(function(){ if(s.parentNode) s.parentNode.removeChild(s); },500); }
+    }, 5000);
+  </script>
   <!-- 부트 스플래시 + 방향 가이드(인스턴트 표시 — main.js 로드 전에 그려진다) -->
   <style>
     #boot-splash{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;

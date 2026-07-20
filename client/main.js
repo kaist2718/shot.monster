@@ -25,6 +25,7 @@ import { setButtonIcon } from './icons.js';
 import { CONFIG, WEAPONS } from '../shared/config.js';
 import { lerp, lerpAngle, dist, clamp, circleRect, TAU, roundRect } from '../shared/utils.js';
 
+console.log('[shot.monster] main.js loaded, booting...');
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const camera = new Camera();
