@@ -236,7 +236,7 @@ function drawMinimap(ctx, W, snap, self, touch) {
   const isLandscape = W > H;
   const size = touch ? (minD < 450 ? 80 : (isLandscape ? 96 : 104)) : 150;
   const pad = minD < 500 ? 12 : 16;
-  const mx = W - size - pad, my = pad;
+  const mx = Math.max(0, W - size - pad), my = Math.max(0, pad);
   const scale = size / worldSize;
   // 프레임 (더 두꺼운 테두리)
   ctx.fillStyle = 'rgba(10,14,20,0.7)'; roundRect(ctx, mx - 3, my - 3, size + 6, size + 6, 11); ctx.fill();
