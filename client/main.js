@@ -9,7 +9,7 @@ import { TouchCtrl } from './touch.js';
 import { Camera } from './camera.js';
 import { Net } from './net.js';
 import { renderWorld } from './render.js';
-import { drawHUD, drawLobby, drawRoundOver, drawSpectate, drawConnecting, drawVignette, drawScoreboard } from './ui.js';
+import { drawHUD, drawLobby, drawRoundOver, drawSpectate, drawConnecting, drawVignette, drawScoreboard, drawMinimap } from './ui.js';
 import { showRewardedAd } from './ad.js';
 import { StartScreen } from './start.js';
 import { ModeSelect, RoomBrowser } from './mode.js';
@@ -764,17 +764,20 @@ function step(ts) {
   if (latest.phase === 'playing') {
     drawHUD(ctx, W, H, info);
     if (Input.touch && Input.touch.enabled) {
-      // 보조 버튼은 사망/관전에도, 스틱은 생존 플레이만
       TouchCtrl.draw(ctx, { combat: !!(self && self.alive), aux: true, self });
     }
     if (!(self && self.alive)) drawSpectate(ctx, W, H);
   } else if (latest.phase === 'lobby') {
     drawHUD(ctx, W, H, info);
     drawLobby(ctx, W, H, info);
+    // 미니맵은 로비 오버레이 위에 다시 그려서 항상 보이도록
+    drawMinimap(ctx, W, latest, self, touchUi);
     if (Input.touch && Input.touch.enabled) TouchCtrl.draw(ctx, { combat: false, aux: true, self: null });
   } else if (latest.phase === 'roundover') {
     drawHUD(ctx, W, H, info);
     drawRoundOver(ctx, W, H, info);
+    // 미니맵은 라운드종료 오버레이 위에 다시 그려서 항상 보이도록
+    drawMinimap(ctx, W, latest, self, touchUi);
     if (Input.touch && Input.touch.enabled) TouchCtrl.draw(ctx, { combat: false, aux: true, self: null });
   }
 

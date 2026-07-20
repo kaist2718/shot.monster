@@ -229,7 +229,7 @@ function drawDesktopStatus(ctx, W, H, self, snap) {
   ctx.fillText(t('killScore', { n: self.score }), W - 20, H - 70);
 }
 
-function drawMinimap(ctx, W, snap, self, touch) {
+export function drawMinimap(ctx, W, snap, self, touch) {
   const worldSize = CONFIG.WORLD_SIZE;
   // 미니맵 크기는 drawHUD에서 이미 계산됨 (info.touch 활용)
   const minD = Math.min(W, H);
@@ -238,10 +238,10 @@ function drawMinimap(ctx, W, snap, self, touch) {
   const pad = minD < 500 ? 12 : 16;
   const mx = Math.max(0, W - size - pad), my = Math.max(0, pad);
   const scale = size / worldSize;
-  // 프레임 (더 두꺼운 테두리)
-  ctx.fillStyle = 'rgba(10,14,20,0.7)'; roundRect(ctx, mx - 3, my - 3, size + 6, size + 6, 11); ctx.fill();
-  ctx.fillStyle = 'rgba(0,0,0,0.45)'; roundRect(ctx, mx, my, size, size, 8); ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 2; roundRect(ctx, mx, my, size, size, 8); ctx.stroke();
+  // 프레임 (더 두꺼운 테두리) — 배경을 완전 불투명으로 변경
+  ctx.fillStyle = 'rgba(10,14,20,0.92)'; roundRect(ctx, mx - 3, my - 3, size + 6, size + 6, 11); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(ctx, mx, my, size, size, 8); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2.5; roundRect(ctx, mx, my, size, size, 8); ctx.stroke();
   // 존(반투명 채우기 + 테두리)
   const zcx = mx + snap.zone.cx * scale, zcy = my + snap.zone.cy * scale, zr = snap.zone.r * scale;
   ctx.beginPath(); ctx.arc(zcx, zcy, Math.max(0.5, zr), 0, TAU);
