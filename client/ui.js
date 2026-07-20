@@ -97,7 +97,7 @@ export function drawHUD(ctx, W, H, info) {
   }
 
   if (snap) {
-    try { drawMinimap(ctx, W, snap, self, touch); } catch (e) { /* 미니맵 오류 무시 */ }
+    try { drawMinimap(ctx, W, H, snap, self, touch); } catch (e) { /* 미니맵 오류 무시 */ }
   }
 }
 
@@ -231,7 +231,7 @@ function drawDesktopStatus(ctx, W, H, self, snap) {
   ctx.fillText(t('killScore', { n: self.score }), W - 20, H - 70);
 }
 
-export function drawMinimap(ctx, W, snap, self, touch) {
+export function drawMinimap(ctx, W, H, snap, self, touch) {
   if (!snap || !snap.zone) return; // 안전 가드
   const worldSize = CONFIG.WORLD_SIZE;
   const minD = Math.min(W, H);
