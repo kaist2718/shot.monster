@@ -82,6 +82,22 @@ export const CONFIG = {
     SPRINT_OUT: 0.78,
     STICK_MAX_R: 56,
     HYBRID_MS: 500,
+    // 한손 모드 전용 설정
+    ONEHAND: {
+      AUTO_AIM_RANGE: 450,           // 자동 조준 최대 거리
+      AUTO_FIRE_DELAY: 0.15,         // 자동 사격 딜레이 (초)
+      TARGET_SWITCH_COOLDOWN: 0.8,   // 타겟 전환 쿨다운 (초)
+      THREAT_WEIGHT_LOW_HP: 0.7,     // 저체력 적 가중치 (40% 이하)
+      THREAT_WEIGHT_APPROACHING: 0.8,// 접근하는 적 가중치
+      PREDICT_LEAD_FACTOR: 0.55,     // 예측 조준 리드 팩터
+      ZONE_AVOID_THRESHOLD: 0.85,    // 존 경계 회피 시작 비율
+      OBSTACLE_AVOID_DIST: 60,       // 장애물 회피 거리
+      AUTO_GRENADE_MIN_DIST: 150,    // 수류탄 최소 투척 거리
+      AUTO_GRENADE_MAX_DIST: 400,    // 수류탄 최대 투척 거리
+      AUTO_GRENADE_COOLDOWN: 5.0,    // 수류탄 쿨다운 (초)
+      AUTO_WEAPON_SWITCH: true,      // 자동 무기 전환 활성화
+      IDLE_MOVE_PATROL: true,        // 유휴 시 자동 순찰
+    },
   },
 
   // 킬 피드

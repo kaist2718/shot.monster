@@ -27,6 +27,9 @@ export const DomUI = {
     this.showPerk(false);
     // 언어 전환 시 버튼 텍스트 갱신(캐싱된 표시 상태 유지)
     I18N.onChange(() => this._repaintText());
+    // 접근성: 버튼에 ARIA 라벨 설정
+    this._revive.setAttribute('aria-label', I18N.t('reviveBtn'));
+    this._perk.setAttribute('aria-label', I18N.t('perkBtn'));
   },
 
   _repaintText() {

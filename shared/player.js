@@ -169,6 +169,7 @@ export class Player {
 // ============================================================
 // Bot - 상태머신 AI. 표적 리드/저체력 후퇴/스트레이프 사격/존 회피.
 // 난이도 스케일링(setSkill): AI 모드는 레벨별, multi 는 중간값.
+// v2: 행동 전환 랜덤화, 수류탄 투척, 엄폐물 활용, 무기 전환.
 // ============================================================
 export class Bot extends Player {
   constructor(id, x, y) {
@@ -179,6 +180,12 @@ export class Bot extends Player {
     this.strafeDir = Math.random() < 0.5 ? 1 : -1;
     this.strafeTimer = rand(0.8, 2);
     this.startWeapon = null; // sim이 지정하면 스폰 시 장비
+    // 행동 전환 타이머 — 패턴 예측 방지
+    this._actionTimer = rand(1.5, 4);
+    this._currentAction = 'idle'; // 'aggressive' | 'defensive' | 'roaming' | 'idle'
+    this._grenadeTimer = rand(3, 8); // 수류탄 투척 쿨다운
+    this._weaponSwitchTimer = rand(5, 12); // 무기 전환 타이머
+    this._retreatAngle = 0; // 후퇴 방향 오프셋
     this.setSkill(0.5);      // 기본 중간 난이도(sim이 덮어씀)
   }
 
@@ -198,9 +205,28 @@ export class Bot extends Player {
     super.update(dt, controller, state); // 타이머/재생(봇이라 여기서 리턴)
     if (!this.alive) return;
 
+    // 행동 전환 타이머 — 예측 불가능한 패턴 변경
+    this._actionTimer -= dt;
+    if (this._actionTimer <= 0) {
+      const r = Math.random();
+      if (r < 0.4) this._currentAction = 'aggressive';
+      else if (r < 0.7) this._currentAction = 'defensive';
+      else this._currentAction = 'roaming';
+      this._actionTimer = rand(2, 5); // 2~5초 후 재결정
+      this._retreatAngle = rand(-0.5, 0.5); // 후퇴 방향 흔들기
+    }
+
+    // 무기 전환 시도(스킬 높은 봇만) — 거리 기반 최적 무기 선택
+    this._weaponSwitchTimer -= dt;
+    if (this._weaponSwitchTimer <= 0 && this.skill > 0.3) {
+      this._trySmartWeaponSwitch(state);
+      this._weaponSwitchTimer = rand(4, 10);
+    }
+
     // 존 바깥/가장자리면 전투보다 생존 우선 — 중심으로 후퇴. 존 사냥(cheese) 방지.
     const zc = state.zone.center;
-    const nearEdge = dist(this.x, this.y, zc.x, zc.y) > state.zone.radius * 0.82;
+    const zoneEdgeRatio = 0.82 - 0.05 * (1 - this.skill); // 스킬 높은 봇은 더 일찍 회피
+    const nearEdge = dist(this.x, this.y, zc.x, zc.y) > state.zone.radius * zoneEdgeRatio;
     if (state.zone.isOutside(this.x, this.y) || nearEdge) {
       this.moveToward(zc.x, zc.y, dt, state);
       const t = this.findNearestEnemy(state);
@@ -214,6 +240,7 @@ export class Bot extends Player {
     const target = this.findNearestEnemy(state);
     if (target) {
       const d = dist(this.x, this.y, target.x, target.y);
+      const hpRatio = this.health / this.maxHealth;
       // 표적 리드: 탄 비행 시간 추정 후 예상 위치로 조준
       const w = this.weapon;
       const tof = d / w.bulletSpeed;
@@ -221,18 +248,71 @@ export class Bot extends Player {
       const py = target.y + (target.vy || 0) * tof * this.leadFactor;
       this.angle = Math.atan2(py - this.y, px - this.x) + rand(-this.aimJitter, this.aimJitter);
 
-      const lowHP = this.health < this.maxHealth * 0.32;
-      if (lowHP) {
-        // 후퇴: 표적 반대 방향으로 빠지며 가끔 사격
-        this.moveToward(this.x * 2 - px, this.y * 2 - py, dt, state);
-      } else if (d > CONFIG.BOT_SHOOT_RANGE * 0.6) {
-        this.moveToward(target.x, target.y, dt, state);
-      } else {
-        this.strafe(dt, state);
+      // 수류탄 투척(스킬 ≥ 0.4, HP 높음, 적 거리 적당)
+      if (this.skill >= 0.4 && this.grenadeCount > 0 && d > 80 && d < 350 && hpRatio > 0.5) {
+        this._grenadeTimer -= dt;
+        if (this._grenadeTimer <= 0) {
+          state.throwGrenade(this);
+          this._grenadeTimer = rand(5, 12);
+        }
       }
-      if (d <= CONFIG.BOT_SHOOT_RANGE && !lowHP && Math.random() < this.aggression) this.tryFire(state);
+
+      // 저체력 임계값을 난이도/행동 기반으로 동적 조절 (더 예측 어려움)
+      const lowHPThreshold = 0.28 + 0.08 * (1 - this.skill);
+      const lowHP = hpRatio < lowHPThreshold;
+
+      if (lowHP) {
+        // 후퇴: 표적 반대 방향 + 랜덤 오프셋으로 예측 방지
+        const retAng = Math.atan2(this.y - target.y, this.x - target.x) + this._retreatAngle;
+        const retX = this.x + Math.cos(retAng) * 200;
+        const retY = this.y + Math.sin(retAng) * 200;
+        this.moveToward(retX, retY, dt, state);
+        // 후퇴 중에도 가끔 사격 (절박한 반격)
+        if (Math.random() < this.aggression * 0.35) this.tryFire(state);
+      } else if (this._currentAction === 'aggressive') {
+        // 공격적: 적극 추격 + 근접 선호
+        if (d > 120) this.moveToward(target.x, target.y, dt, state);
+        else this.strafe(dt, state); // 근접 스트레이프
+        if (d <= CONFIG.BOT_SHOOT_RANGE && Math.random() < this.aggression) this.tryFire(state);
+      } else if (this._currentAction === 'defensive') {
+        // 방어적: 거리 유지 + 스트레이프
+        if (d < CONFIG.BOT_SHOOT_RANGE * 0.4) {
+          // 너무 가까우면 뒤로 빠지며 스트레이프
+          const retAng = Math.atan2(this.y - target.y, this.x - target.x);
+          this.applyMove(this.x + Math.cos(retAng + this.strafeDir * 0.8) * this.speed * 0.6 * dt,
+                         this.y + Math.sin(retAng + this.strafeDir * 0.8) * this.speed * 0.6 * dt, state);
+        } else if (d > CONFIG.BOT_SHOOT_RANGE * 0.7) {
+          this.moveToward(target.x, target.y, dt, state);
+        } else {
+          this.strafe(dt, state);
+        }
+        if (d <= CONFIG.BOT_SHOOT_RANGE && Math.random() < this.aggression * 0.8) this.tryFire(state);
+      } else {
+        // roaming: 기본 행동 (기존 로직)
+        if (d > CONFIG.BOT_SHOOT_RANGE * 0.6) {
+          this.moveToward(target.x, target.y, dt, state);
+        } else {
+          this.strafe(dt, state);
+        }
+        if (d <= CONFIG.BOT_SHOOT_RANGE && Math.random() < this.aggression) this.tryFire(state);
+      }
     } else {
       this.wander(dt, state);
+    }
+  }
+
+  // 지능형 무기 전환: 적 거리에 따라 최적 무기 선택
+  _trySmartWeaponSwitch(state) {
+    const target = this.findNearestEnemy(state);
+    if (!target) return;
+    const d = dist(this.x, this.y, target.x, target.y);
+    // 근접: 샷건 선호, 중거리: SMG, 원거리: 권총
+    if (d < 120 && this.ownedWeapons.has('shotgun')) {
+      this.switchWeapon('shotgun');
+    } else if (d > 300 && this.ownedWeapons.has('pistol')) {
+      this.switchWeapon('pistol');
+    } else if (this.ownedWeapons.has('smg')) {
+      this.switchWeapon('smg');
     }
   }
 

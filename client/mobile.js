@@ -12,7 +12,7 @@ const t = (k) => I18N.t(k);
 
 const DEFAULTS = {
   stickMode: 'dynamic', // 'dynamic' | 'fixed'
-  scheme: 'dual',       // 'dual'(양손가락) | 'casual'(원핑거 탭이동+자동조준/사격)
+  scheme: 'onehand',    // 'onehand'(완전 자동 한손) | 'casual'(원핑거 탭이동+자동조준/사격) | 'dual'(양손가락)
   fireButton: false,
   autoFire: true,
   runButton: false,
@@ -27,6 +27,12 @@ const DEFAULTS = {
   quality: 'high',      // 'high' | 'med' | 'low' — 파티클/그림자 밀도
   particles: true,
   shadows: true,
+  // 한손 모드 전용 설정
+  onehandAutoAim: true,        // 자동 조준 활성화
+  onehandAutoMove: true,       // 자동 이동 활성화 (존 회피, 적 추적)
+  onehandAutoWeapon: true,     // 자동 무기 전환
+  onehandAutoGrenade: true,    // 자동 수류탄 투척
+  onehandAggressiveness: 0.7,  // 공격성 0~1 (높을수록 적극적 전투)
 };
 
 const NUM_RANGE = {
@@ -69,6 +75,10 @@ export const MobileSettings = {
     this._vals[k] = v;
     this.save();
     for (const fn of listeners) { try { fn(k, v); } catch { /* 무시 */ } }
+    // scheme 변경 시 한손 모드 UI 업데이트
+    if (k === 'scheme' && SettingsPanel._updateOnehandRows) {
+      SettingsPanel._updateOnehandRows();
+    }
   },
   onChange(fn) { if (typeof fn === 'function') listeners.add(fn); return () => listeners.delete(fn); },
 };
@@ -82,6 +92,15 @@ export const SettingsPanel = {
   _segBtns: null,
   isOpen() { return !!this._root; },
   toggle() { this.isOpen() ? this.close() : this.open(); },
+
+  _onehandRows: null,
+  _updateOnehandRows() {
+    if (!this._onehandRows) return;
+    const show = MobileSettings.get('scheme') === 'onehand';
+    for (const { row } of this._onehandRows) {
+      row.style.display = show ? 'flex' : 'none';
+    }
+  },
 
   open() {
     if (this._root) return;
@@ -114,15 +133,59 @@ export const SettingsPanel = {
     card.appendChild(stick.row);
     rows.push({ label: stick.labelEl, key: 'stickMode' });
 
-    // 조작 체계: 듀얼(양손가락) / 캐주얼(원핑거 탭이동+자동조준)
+    // 조작 체계: 듀얼(양손가락) / 캐주얼(원핑거 탭이동+자동조준) / 한손(완전 자동)
     const scheme = this._mkRow();
     const seg2 = this._mkSeg([
       { v: 'dual', labelKey: 'stickDual' },
       { v: 'casual', labelKey: 'stickCasual' },
+      { v: 'onehand', labelKey: 'stickOnehand' },
     ], s.scheme, (v) => MobileSettings.set('scheme', v));
     scheme.bodyEl.appendChild(seg2.el);
     card.appendChild(scheme.row);
     rows.push({ label: scheme.labelEl, key: 'scheme' });
+
+    // 한손 모드 전용 설정 (scheme === 'onehand' 일 때만 표시)
+    this._onehandRows = [];
+    const onehandTitle = this._mkRow();
+    onehandTitle.labelEl.style.cssText = 'font-size:12px;font-weight:700;color:#ffd23f;margin-top:8px;';
+    onehandTitle.labelEl.textContent = t('onehandSettings');
+    onehandTitle.bodyEl.style.display = 'none';
+    card.appendChild(onehandTitle.row);
+    this._onehandRows.push({ row: onehandTitle.row });
+
+    for (const k of ['onehandAutoAim', 'onehandAutoMove', 'onehandAutoWeapon', 'onehandAutoGrenade']) {
+      const r = this._mkRow();
+      const cb = this._mkCheck(s[k], (v) => MobileSettings.set(k, v));
+      r.bodyEl.appendChild(cb);
+      r.row.style.display = 'none';
+      card.appendChild(r.row);
+      rows.push({ label: r.labelEl, key: k });
+      this._onehandRows.push({ row: r.row });
+    }
+
+    // 한손 모드 공격성 슬라이더
+    const aggrRow = this._mkRow();
+    const aggrSlider = document.createElement('input');
+    aggrSlider.type = 'range'; aggrSlider.min = '0'; aggrSlider.max = '1'; aggrSlider.step = '0.1';
+    aggrSlider.value = String(s.onehandAggressiveness);
+    aggrSlider.style.cssText = 'flex:1;accent-color:#ffd23f;cursor:pointer;';
+    const aggrVal = document.createElement('span');
+    aggrVal.style.cssText = 'min-width:42px;text-align:right;font-size:12px;opacity:.85;';
+    aggrVal.textContent = Math.round(s.onehandAggressiveness * 100) + '%';
+    aggrSlider.addEventListener('input', () => {
+      const v = parseFloat(aggrSlider.value);
+      MobileSettings.set('onehandAggressiveness', v);
+      aggrVal.textContent = Math.round(v * 100) + '%';
+    });
+    aggrRow.bodyEl.appendChild(aggrSlider);
+    aggrRow.bodyEl.appendChild(aggrVal);
+    aggrRow.row.style.display = 'none';
+    card.appendChild(aggrRow.row);
+    rows.push({ label: aggrRow.labelEl, key: 'onehandAggressiveness' });
+    this._onehandRows.push({ row: aggrRow.row });
+
+    // 한손 모드 UI 표시/숨김 토글
+    this._updateOnehandRows();
 
     // 그래픽 품질
     const q = this._mkRow();

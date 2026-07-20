@@ -5,6 +5,7 @@
 // ============================================================
 
 import { COUNTRIES } from '../shared/countries.js';
+import { CONFIG } from '../shared/config.js';
 import { Sound } from './sound.js';
 import { I18N } from './i18n.js';
 
@@ -104,6 +105,13 @@ export const StartScreen = {
     devEl.style.cssText = 'font-size:10px;opacity:.4;margin-top:6px;';
     card.appendChild(devEl);
 
+    // 진행 상황 복구 메시지 (이미 플레이어인 경우)
+    const recoveryEl = document.createElement('div');
+    recoveryEl.style.cssText = 'font-size:12px;color:#7fe08a;margin-top:8px;';
+    recoveryEl.textContent = I18N.t('progressRestored');
+    recoveryEl.style.display = returning ? 'block' : 'none';
+    card.appendChild(recoveryEl);
+
     // 튜토리얼 버튼
     const tutBtn = document.createElement('button');
     tutBtn.style.cssText =
@@ -140,12 +148,16 @@ export const StartScreen = {
       noteEl.textContent = I18N.t('startNote');
       tutBtn.textContent = I18N.t('tutorialTitle');
       devEl.textContent = I18N.t('devContact');
+      recoveryEl.style.display = returning ? 'block' : 'none';
     };
 
-    // 튜토리얼 표시 (상세 버전)
+    // 튜토리얼 표시 (멀티페이지, 모드별 내용)
+    const TUTORIAL_KEY = 'br_tutorial_v2';
+    let _tutPage = 0;
     const showTutorial = () => {
       const existing = document.getElementById('tutorial-screen');
       if (existing) return;
+      const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
       const tRoot = document.createElement('div');
       tRoot.id = 'tutorial-screen';
       tRoot.style.cssText =
@@ -154,70 +166,238 @@ export const StartScreen = {
         'font-family:"Segoe UI","Malgun Gothic",system-ui,sans-serif;';
       const tCard = document.createElement('div');
       tCard.style.cssText =
-        'width:min(92vw,480px);max-height:80vh;overflow:auto;padding:24px;border-radius:16px;' +
+        'width:min(92vw,500px);max-height:82vh;overflow-y:auto;padding:24px;border-radius:16px;' +
         'background:rgba(20,24,30,0.95);box-shadow:0 8px 32px rgba(0,0,0,.6);';
-      const tTitle = document.createElement('div');
-      tTitle.style.cssText = 'font-size:22px;font-weight:800;color:#ffd23f;margin-bottom:16px;';
-      tTitle.textContent = I18N.t('tutorialTitle');
-      tCard.appendChild(tTitle);
 
-      const steps = [
-        { key: 'tutorialMove', icon: '🎮', label: '이동 조작' },
-        { key: 'tutorialAim', icon: '🎯', label: '조준' },
-        { key: 'tutorialFire', icon: '🔫', label: '사격' },
-        { key: 'tutorialGrenade', icon: '💣', label: '수류탄' },
-        { key: 'aimAssist', icon: '⚡', label: '에임 어시스트' },
-      ];
-      const ul = document.createElement('div');
-      ul.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
-      for (const s of steps) {
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;';
-        const icon = document.createElement('div');
-        icon.style.cssText = 'font-size:24px;';
-        icon.textContent = s.icon;
-        const text = document.createElement('div');
-        text.style.cssText = 'font-size:14px;line-height:1.5;opacity:.9;';
-        const label = document.createElement('div');
-        label.style.cssText = 'font-weight:600;color:#ffd23f;';
-        label.textContent = s.label;
-        const desc = document.createElement('div');
-        desc.textContent = I18N.t(s.key);
-        text.appendChild(label);
-        text.appendChild(desc);
-        row.appendChild(icon);
-        row.appendChild(text);
-        ul.appendChild(row);
-      }
-      tCard.appendChild(ul);
-
-      // 모바일/데스크탑 구분 안내
-      const hint = document.createElement('div');
-      hint.style.cssText = 'font-size:12px;opacity:.6;margin-top:16px;padding:12px;background:rgba(255,255,255,.05);border-radius:8px;';
-      hint.textContent = I18N.t('hintDesktop');
-      tCard.appendChild(hint);
-
+      // 페이지 콘텐츠 생성
+      const titleEl = document.createElement('div');
+      titleEl.style.cssText = 'font-size:20px;font-weight:800;color:#ffd23f;margin-bottom:4px;';
+      const subtitleEl = document.createElement('div');
+      subtitleEl.style.cssText = 'font-size:12px;color:rgba(255,255,255,.55);margin-bottom:14px;';
+      const contentEl = document.createElement('div');
+      contentEl.style.cssText = 'min-height:260px;';
+      const pageDots = document.createElement('div');
+      pageDots.style.cssText = 'display:flex;justify-content:center;gap:6px;margin:10px 0 4px;';
       const btnRow = document.createElement('div');
-      btnRow.style.cssText = 'display:flex;justify-content:space-between;margin-top:20px;';
-      const skipBtn = document.createElement('button');
-      skipBtn.style.cssText =
-        'padding:8px 16px;border:none;border-radius:8px;background:rgba(255,255,255,.1);color:#fff;cursor:pointer;';
-      skipBtn.textContent = I18N.t('tutorialSkip');
-      const nextBtn = document.createElement('button');
-      nextBtn.style.cssText =
-        'padding:8px 16px;border:none;border-radius:8px;background:#ffd23f;color:#20242b;cursor:pointer;';
-      nextBtn.textContent = I18N.t('tutorialNext');
-      btnRow.appendChild(skipBtn);
-      btnRow.appendChild(nextBtn);
+      btnRow.style.cssText = 'display:flex;justify-content:space-between;margin-top:16px;';
+
+      const pages = [
+        // Page 0: 기본 조작
+        () => {
+          titleEl.textContent = I18N.t('tutorialPage1Title');
+          subtitleEl.textContent = I18N.t('tutorialPage1Desc');
+          contentEl.innerHTML = '';
+          const items = [
+            { key: 'tutorialMove', icon: '🎮' },
+            { key: 'tutorialAim', icon: '🎯' },
+            { key: 'tutorialFire', icon: '🔫' },
+            { key: 'tutorialReload', icon: '🔄' },
+            { key: 'tutorialWeapon', icon: '🔫' },
+            { key: 'tutorialSprint', icon: '🏃' },
+            { key: 'tutorialGrenade', icon: '💣' },
+          ];
+          const ul = document.createElement('div');
+          ul.style.cssText = 'display:flex;flex-direction:column;gap:10px;';
+          for (const s of items) {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.04);';
+            const icon = document.createElement('div');
+            icon.style.cssText = 'font-size:20px;width:28px;text-align:center;';
+            icon.textContent = s.icon;
+            const desc = document.createElement('div');
+            desc.style.cssText = 'font-size:13px;line-height:1.5;opacity:.9;';
+            desc.textContent = I18N.t(s.key);
+            row.appendChild(icon);
+            row.appendChild(desc);
+            ul.appendChild(row);
+          }
+          contentEl.appendChild(ul);
+        },
+        // Page 1: 한손 모드 (모바일) / 게임팁 (데스크탑)
+        () => {
+          if (isMobile) {
+            titleEl.textContent = I18N.t('tutorialPage2Title');
+            subtitleEl.textContent = I18N.t('tutorialPage2Desc');
+            contentEl.innerHTML = '';
+            const items = [
+              { key: 'tutorialOnehandIntro', icon: '🤖' },
+              { key: 'tutorialOnehandTouch', icon: '👆' },
+              { key: 'tutorialOnehandAim', icon: '🎯' },
+              { key: 'tutorialOnehandMove', icon: '🚶' },
+              { key: 'tutorialOnehandWeapon', icon: '🔄' },
+              { key: 'tutorialOnehandGrenade', icon: '💣' },
+              { key: 'tutorialOnehandAggro', icon: '⚡' },
+            ];
+            const ul = document.createElement('div');
+            ul.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+            for (const s of items) {
+              const row = document.createElement('div');
+              row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.04);';
+              const icon = document.createElement('div');
+              icon.style.cssText = 'font-size:18px;width:26px;text-align:center;';
+              icon.textContent = s.icon;
+              const desc = document.createElement('div');
+              desc.style.cssText = 'font-size:12px;line-height:1.5;opacity:.9;';
+              desc.textContent = I18N.t(s.key);
+              row.appendChild(icon);
+              row.appendChild(desc);
+              ul.appendChild(row);
+            }
+            contentEl.appendChild(ul);
+            // 다른 모드 안내
+            const modeNote = document.createElement('div');
+            modeNote.style.cssText = 'font-size:11px;opacity:.6;margin-top:12px;padding:10px;background:rgba(255,221,122,.12);border-radius:8px;border:1px solid rgba(255,221,122,.25);';
+            modeNote.textContent = I18N.t('tutorialMobile');
+            contentEl.appendChild(modeNote);
+          } else {
+            // 데스크탑: 게임 시스템 (page 3을 page 2로)
+            titleEl.textContent = I18N.t('tutorialPage3Title');
+            subtitleEl.textContent = I18N.t('tutorialPage3Desc');
+            contentEl.innerHTML = '';
+            const items = [
+              { key: 'tutorialZone', icon: '⚠️' },
+              { key: 'tutorialPickup', icon: '🎒' },
+              { key: 'tutorialCoins', icon: '🪙' },
+              { key: 'tutorialMission', icon: '📋', vars: { n: CONFIG.COINS.MISSION_TARGET } },
+              { key: 'tutorialRanking', icon: '🏅' },
+              { key: 'tutorialRevive', icon: '💀' },
+              { key: 'tutorialPing', icon: '📍' },
+              { key: 'tutorialQuickChat', icon: '💬' },
+            ];
+            const ul = document.createElement('div');
+            ul.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+            for (const s of items) {
+              const row = document.createElement('div');
+              row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.04);';
+              const icon = document.createElement('div');
+              icon.style.cssText = 'font-size:17px;width:26px;text-align:center;';
+              icon.textContent = s.icon;
+              const desc = document.createElement('div');
+              desc.style.cssText = 'font-size:12px;line-height:1.5;opacity:.9;';
+              desc.textContent = s.vars ? I18N.t(s.key, s.vars) : I18N.t(s.key);
+              row.appendChild(icon);
+              row.appendChild(desc);
+              ul.appendChild(row);
+            }
+            contentEl.appendChild(ul);
+          }
+        },
+        // Page 2: 게임 시스템 (모바일만 추가 페이지)
+        isMobile ? () => {
+          titleEl.textContent = I18N.t('tutorialPage3Title');
+          subtitleEl.textContent = I18N.t('tutorialPage3Desc');
+          contentEl.innerHTML = '';
+          const items = [
+            { key: 'tutorialZone', icon: '⚠️' },
+            { key: 'tutorialPickup', icon: '🎒' },
+            { key: 'tutorialCoins', icon: '🪙' },
+            { key: 'tutorialMission', icon: '📋', vars: { n: CONFIG.COINS.MISSION_TARGET } },
+            { key: 'tutorialRanking', icon: '🏅' },
+            { key: 'tutorialRevive', icon: '💀' },
+            { key: 'tutorialPing', icon: '📍' },
+            { key: 'tutorialQuickChat', icon: '💬' },
+          ];
+          const ul = document.createElement('div');
+          ul.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+          for (const s of items) {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.04);';
+            const icon = document.createElement('div');
+            icon.style.cssText = 'font-size:17px;width:26px;text-align:center;';
+            icon.textContent = s.icon;
+            const desc = document.createElement('div');
+            desc.style.cssText = 'font-size:12px;line-height:1.5;opacity:.9;';
+            desc.textContent = s.vars ? I18N.t(s.key, s.vars) : I18N.t(s.key);
+            row.appendChild(icon);
+            row.appendChild(desc);
+            ul.appendChild(row);
+          }
+          contentEl.appendChild(ul);
+        } : null,
+      ].filter(Boolean);
+
+      const totalPages = pages.length;
+
+      const renderPage = () => {
+        _tutPage = Math.max(0, Math.min(totalPages - 1, _tutPage));
+        // 페이지 내용 그리기
+        contentEl.innerHTML = '';
+        titleEl.innerHTML = '';
+        subtitleEl.innerHTML = '';
+        pageDots.innerHTML = '';
+        if (pages[_tutPage]) pages[_tutPage]();
+        // 페이지 도트
+        for (let i = 0; i < totalPages; i++) {
+          const dot = document.createElement('div');
+          dot.style.cssText =
+            'width:8px;height:8px;border-radius:50%;cursor:pointer;transition:all .2s;' +
+            `background:${i === _tutPage ? '#ffd23f' : 'rgba(255,255,255,.2)'};` +
+            (i === _tutPage ? 'transform:scale(1.3);' : '');
+          (idx => {
+            dot.addEventListener('click', () => { _tutPage = idx; renderPage(); });
+          })(i);
+          pageDots.appendChild(dot);
+        }
+        // 버튼
+        btnRow.innerHTML = '';
+        const isFirst = _tutPage === 0;
+        const isLast = _tutPage === totalPages - 1;
+        const prevBtn = document.createElement('button');
+        prevBtn.style.cssText =
+          'padding:8px 16px;border:none;border-radius:8px;background:' +
+          (isFirst ? 'rgba(255,255,255,.06)' : 'rgba(255,255,255,.12)') + ';' +
+          'color:#fff;cursor:pointer;font-size:13px;' +
+          'opacity:' + (isFirst ? '.4' : '1') + ';' +
+          'transition:background .15s;';
+        prevBtn.textContent = I18N.t('tutorialPrev');
+        prevBtn.disabled = isFirst;
+        prevBtn.addEventListener('click', () => { if (!isFirst) { _tutPage--; renderPage(); } });
+        const skipBtn = document.createElement('button');
+        skipBtn.style.cssText =
+          'padding:8px 16px;border:none;border-radius:8px;background:rgba(255,255,255,.1);' +
+          'color:rgba(255,255,255,.6);cursor:pointer;font-size:13px;transition:background .15s;';
+        skipBtn.textContent = I18N.t('tutorialSkip');
+        skipBtn.addEventListener('click', closeTutorial);
+        const nextBtn = document.createElement('button');
+        nextBtn.style.cssText =
+          'padding:8px 20px;border:none;border-radius:8px;background:#ffd23f;color:#20242b;' +
+          'cursor:pointer;font-weight:bold;font-size:13px;transition:background .15s;';
+        nextBtn.textContent = isLast ? I18N.t('tutorialDone') : I18N.t('tutorialNext');
+        nextBtn.addEventListener('click', () => {
+          if (isLast) closeTutorial();
+          else { _tutPage++; renderPage(); }
+        });
+        btnRow.appendChild(prevBtn);
+        btnRow.appendChild(skipBtn);
+        btnRow.appendChild(nextBtn);
+      };
+
+      tCard.appendChild(titleEl);
+      tCard.appendChild(subtitleEl);
+      tCard.appendChild(contentEl);
+      tCard.appendChild(pageDots);
       tCard.appendChild(btnRow);
       tRoot.appendChild(tCard);
 
-      const closeTutorial = () => { if (tRoot.parentNode) tRoot.parentNode.removeChild(tRoot); };
-      skipBtn.addEventListener('click', closeTutorial);
-      nextBtn.addEventListener('click', closeTutorial);
+      const closeTutorial = () => {
+        if (tRoot.parentNode) tRoot.parentNode.removeChild(tRoot);
+        // 본 튜토리얼을 본 경우 더 이상 first hint 표시 안 함
+        try { localStorage.setItem(TUTORIAL_KEY, '1'); } catch {}
+      };
 
       document.body.appendChild(tRoot);
+      renderPage();
     };
+
+    // 첫 방문 시 튜토리얼 자동 표시 (로컬스토리지 체크)
+    const hasSeenTutorial = (() => { try { return localStorage.getItem(TUTORIAL_KEY) === '1'; } catch { return false; } })();
+    if (!hasSeenTutorial) {
+      // 약간 지연 후 표시 (화면이 먼저 그려지도록)
+      setTimeout(() => {
+        // 이미 시작 화면이 사라졌으면 표시하지 않음
+        if (document.getElementById('start-screen')) showTutorial();
+      }, 600);
+    }
 
     btnEN.addEventListener('click', () => { I18N.setLang('en'); paint(); });
     btnKO.addEventListener('click', () => { I18N.setLang('ko'); paint(); });

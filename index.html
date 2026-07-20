@@ -8,6 +8,9 @@
   <meta name="description" content="실시간 2D 배틀로얄 — shot.monster. AI 캠페언 / 인간 멀티.">
   <meta name="application-name" content="shot.monster">
   <meta name="theme-color" content="#20242b">
+  <!-- 접근성 -->
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#20242b">
 
   <!-- 모바일/설치형 앱(PWA) 메타: 홈화면 추가 시 전체화면 스탠드얼론 실행 -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -71,7 +74,7 @@
 
   <div id="orient-hint" aria-hidden="true"><div class="pill"><span class="orient-ico" aria-hidden="true"></span><span id="orient-hint-text">가로 모드를 권장합니다</span></div></div>
 
-  <canvas id="game"></canvas>
+  <canvas id="game" role="application" aria-label="shot.monster 게임 화면" tabindex="0"></canvas>
 
   <!-- socket.io 클라이언트(전역 io 제공) + ESM 진입점 -->
   <script src="/socket.io/socket.io.js"></script>

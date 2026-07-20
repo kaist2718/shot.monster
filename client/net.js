@@ -14,6 +14,7 @@ export const Net = {
   level: 1,            // AI 모드 현재 레벨
   rtt: 0,              // 왕복 지연(ms)
   connected: false,    // 연결 상태(끊김/재연결 UI용)
+  reconnectAttempts: 0, // 재연결 시도 횟수(연결 끊김 UI 피드백용)
   leaderboard: [],     // 오늘의 탑 10(멀티, 킬순) [{name, kills, country}]
   aiLeaderboard: [],   // 오늘의 AI 탑 10(최고 레벨순) [{name, maxLevel, country}]
   countryBoard: [],    // 오늘의 국가 순위 [{country, kills, players}]
@@ -39,12 +40,16 @@ export const Net = {
       reconnectionDelayMax: 5000,
     });
 
-    this.socket.on('connect', () => { this.connected = true; });
-    this.socket.on('disconnect', () => {
+    this.socket.on('connect', () => { this.connected = true; this.reconnectAttempts = 0; });
+    this.socket.on('disconnect', (reason) => {
       this.connected = false;
-      console.log('서버 연결 끊김. 재연결을 시도합니다...');
+      console.log('서버 연결 끊김:', reason || 'unknown');
     });
-    this.socket.on('connect_error', () => { this.connected = false; });
+    this.socket.on('connect_error', (err) => {
+      this.connected = false;
+      this.reconnectAttempts++;
+      console.log('연결 오류:', err.message || err);
+    });
     this.socket.on('serverFull', () => { cb.onServerFull && cb.onServerFull(); });
 
     this.socket.on('init', (d) => {

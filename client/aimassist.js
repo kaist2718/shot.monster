@@ -11,11 +11,16 @@ const ASSIST_CONE = 0.85;       // ~49° half-angle (rad) - 더 넓은 콘
 const MAX_DEG_PER_SEC = 130;     // strength=1 기준 초당 최대 보정(도) - 더 빠른 보정
 
 // Sticky 시간: 설정에서 가져오거나 기본값 사용
-const DEFAULT_STICKY_MS = 500;  // 기본 sticky 유지 시간(ms)
+// stickiness 값(0~1)은 200~800ms 범위로 매핑됨. 0을 선택하면 200ms가 최소값.
+// 모바일 설정 패널 기본값(0.25) = 200 + 0.25 * 600 = 350ms
+const MIN_STICKY_MS = 200;
+const MAX_STICKY_MS = 800;
+const DEFAULT_STICKY_MS = 500;  // 설정 없을 때 기본값
 function getStickyMs(stickiness) {
-  // stickiness 값(0~1)에 따라 200~800ms 범위로 매핑
-  const ms = stickiness != null ? 200 + stickiness * 600 : DEFAULT_STICKY_MS;
-  return ms;
+  // stickiness가 0~1 범위이면 200~800ms로 매핑, 아니면 기본값 사용
+  if (stickiness == null) return DEFAULT_STICKY_MS;
+  const clamped = Math.max(0, Math.min(1, stickiness));
+  return MIN_STICKY_MS + clamped * (MAX_STICKY_MS - MIN_STICKY_MS);
 }
 
 let stickyId = null;

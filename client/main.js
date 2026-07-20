@@ -42,6 +42,7 @@ let lastContract = { moveX: 0, moveY: 0, angle: 0, firing: false, reload: false,
 let stickyReload = false;       // 전송될 때까지 유지
 let prevFiringLocal = false;
 let frameDt = 1 / 60;
+let entityMap = new Map();      // O(1) 엔티티 룩업 (ID → 엔티티) — 성능 최적화
 
 let prevHealth = null;
 let prevReload = 0;
@@ -78,6 +79,7 @@ const paintMute = () => {
   muteBtn.title = I18N.t('muteTitle');
   muteBtn.setAttribute('aria-label', I18N.t('muteTitle'));
 };
+muteBtn.setAttribute('aria-label', I18N.t('muteTitle')); // 초기 ARIA 설정
 function layoutMute() {
   if (!muteBtn) return;
   const touch = Input.touch && Input.touch.enabled;
@@ -126,9 +128,7 @@ Sound.init();
 I18N.init();
 MobileSettings.load();
 GamepadCtrl.init();
-// 터치 하드웨어면 mute를 우상단으로 재배치
-layoutMute();
-paintMute();
+
 muteBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   Sound.toggleMute(); paintMute();
@@ -194,7 +194,6 @@ TouchCtrl.init(canvas, camera, {
     }
   }
 });
-layoutMute(); // 터치 capability 확정 후 mute 위치 재배치
 // 터치 기기 감지 후 preferTouchUi 갱신
 preferTouchUi = !!(Input.touch && Input.touch.enabled);
 initOrientationHint();
@@ -256,7 +255,7 @@ function initNet() {
       if (e.killerId === Net.yourId) { buzz(20); Sound.play('kill'); }
       if (e.victimId === Net.yourId) Sound.play('death');
       if (latest) {
-        const v = latest.entities.find((x) => x.id === e.victimId);
+        const v = entityMap.get(e.victimId); // O(1) 룩업
         if (v) particles.death(v.x, v.y, v.color);
       }
     },
@@ -264,9 +263,9 @@ function initNet() {
       const mine = e.shooterId === Net.yourId;
       if (mine) { hitMarker = CONFIG.FEEDBACK.HITMARKER_TTL; Sound.play('hit'); }
       if (latest) {
-        const v = latest.entities.find((x) => x.id === e.victimId);
+        const v = entityMap.get(e.victimId); // O(1) 룩업
         if (v) {
-          const s = latest.entities.find((x) => x.id === e.shooterId);
+          const s = entityMap.get(e.shooterId); // O(1) 룩업
           const ang = s ? Math.atan2(v.y - s.y, v.x - s.x) : 0;
           particles.blood(v.x, v.y, ang);
           if (mine && typeof e.damage === 'number') particles.damageText(v.x, v.y - 18, e.damage, false);
@@ -322,11 +321,12 @@ function useTouchContract() {
   // 캐주얼 모드에서도 터치 입력으로 인식
   const now = performance.now();
   const touchRecent = t.active || t.reloadEdge || (now - Input.lastTouchAt < HYBRID_MS) ||
-                      (scheme === 'casual' && typeof TouchCtrl._casualTarget === 'object');
+                      (scheme === 'casual' && typeof TouchCtrl._casualTarget === 'object') ||
+                      (scheme === 'onehand' && t.active);
   if (!touchRecent) return false;
   const mouseNewer = Input.lastMouseAt > Input.lastTouchAt + 30;
   const keyNewer = Input.lastKeyAt > Input.lastTouchAt + 30;
-  if ((mouseNewer || keyNewer) && !t.active && scheme !== 'casual') return false;
+  if ((mouseNewer || keyNewer) && !t.active && scheme !== 'casual' && scheme !== 'onehand') return false;
   return true;
 }
 
@@ -511,10 +511,10 @@ function pushKill(e) {
   let victimName = e.victimName, victimCC = '';
   if (latest) {
     if (e.killerId) {
-      const k = latest.entities.find((x) => x.id === e.killerId);
+      const k = entityMap.get(e.killerId); // O(1) 룩업
       if (k) { killerName = k.name; killerCC = k.country ? '[' + k.country + '] ' : ''; }
     }
-    const v = latest.entities.find((x) => x.id === e.victimId);
+    const v = entityMap.get(e.victimId); // O(1) 룩업
     if (v && v.country) victimCC = '[' + v.country + '] ';
   }
   const text = killerName
@@ -553,8 +553,11 @@ function step(ts) {
   } else preferTouchUi = false;
 
   if (latest) {
+    // 엔티티 Map 재구축 (O(1) 룩업 성능 최적화)
+    entityMap.clear();
     const liveIds = new Set();
     for (const e of latest.entities) {
+      entityMap.set(e.id, e);
       liveIds.add(e.id);
       if (e.id === Net.yourId) continue;
       let cur = smoothed.get(e.id);
@@ -567,11 +570,18 @@ function step(ts) {
     }
     for (const id of smoothed.keys()) if (!liveIds.has(id)) smoothed.delete(id);
 
-    self = latest.entities.find((e) => e.id === Net.yourId) || null;
+    self = entityMap.get(Net.yourId) || null; // O(1) 룩업
 
     // 전투 입력 활성(생존 플레이 중)
     const combatOn = !!(self && self.alive && latest.phase === 'playing');
     TouchCtrl.setCombatEnabled(combatOn);
+
+    // 존 정보를 TouchCtrl에 전달 (한손 모드 존 회피용)
+    if (latest.zone) {
+      TouchCtrl.updateZoneInfo(latest.zone.cx, latest.zone.cy, latest.zone.r);
+    }
+    // 장애물 정보를 TouchCtrl에 전달 (한손 모드 장애물 회피용)
+    TouchCtrl.updateObstacles(worldObstacles);
 
     // 캐주얼 모드: aimX/aimY 업데이트 (조준선/히트마커 위치 정확성)
     if (latest && self && self.alive) {
@@ -634,7 +644,7 @@ function step(ts) {
     prevReload = self ? self.reloadTimer : 0;
 
     const focus = (self && self.alive) ? (predictedSelf || self)
-                : (latest.entities.find((e) => e.alive) || self)
+                : (latest.entities.find((e) => e.alive) || self) // 첫 번째 생존 엔티티는 find가 더 빠름
                 || { x: latest.zone.cx, y: latest.zone.cy };
     if (!camSnapped) { camera.snap(focus, W, H); camSnapped = true; }
     else camera.follow(focus, dt, W, H);
@@ -712,9 +722,9 @@ function step(ts) {
 
     // 퀵챗 이모트 표시
     for (const em of activeEmotes) {
-      // 가장 가까운 엔티티에 표시
+      // 이름 기반 룩업은 Map보다 find가 적합 (이름 중복 가능)
       if (latest) {
-        const target = latest.entities.find((e) => e.name === em.name);
+        const target = entityMap.get(em.entityId) || latest.entities.find((e) => e.name === em.name);
         if (target) {
           const ex = SX(target.x), ey = SY(target.y) - 32 * z;
           const ea = Math.min(1, em.ttl / 2.5);
@@ -734,11 +744,17 @@ function step(ts) {
   }
   ctx.restore();
 
-  // 끊김: 마지막 프레임 유지 + 반투명 배너
+  // 끊김: 마지막 프레임 유지 + 반투명 배너 + 재연결 시도 횟수
   if (!Net.connected) {
     ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, W, H);
     ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.font = 'bold 24px sans-serif';
-    ctx.fillText(I18N.t('reconnecting'), W / 2, H / 2);
+    ctx.fillText(I18N.t('reconnecting'), W / 2, H / 2 - 20);
+    // 재연결 시도 횟수 표시
+    if (Net.reconnectAttempts > 0) {
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillStyle = '#ffd23f';
+      ctx.fillText(I18N.t('reconnectAttempts', { n: Net.reconnectAttempts }), W / 2, H / 2 + 14);
+    }
     return;
   }
 
@@ -761,7 +777,10 @@ function step(ts) {
     self, snap: latest, ping: Net.rtt, killFeed, leaderboard: Net.leaderboard,
     aiLeaderboard: Net.aiLeaderboard, countryBoard: Net.countryBoard, myId: Net.yourId,
     mode: Net.mode, level: Net.level, lastAIResult, touch: touchUi,
-    showHint: !touchUi && hintAge < 12,
+    showHint: hintAge < 12,
+    scheme: touchUi ? (MobileSettings.get('scheme') || 'onehand') : undefined,
+    touchActive: touchUi ? !!(Input.touch && Input.touch.active) : false,
+    hintAge,
   };
   if (latest.phase === 'playing') {
     drawHUD(ctx, W, H, info);

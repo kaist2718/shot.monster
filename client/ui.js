@@ -24,6 +24,26 @@ export function drawHUD(ctx, W, H, info) {
 
   ctx.font = '12px sans-serif';
   if (touch) {
+    // 모바일 조작 힌트 (게임 플레이 중, 초반에만)
+    if (info.showHint !== false && info.scheme && self && self.alive && phase === 'playing' && info.hintAge < 10) {
+      const hintText = info.scheme === 'onehand'
+        ? (info.touchActive ? '🟡 ' + t('onehandModeIndicator') : '👆 ' + t('stickOnehand'))
+        : info.scheme === 'casual'
+          ? '👆 ' + t('stickCasual')
+          : '';
+      if (hintText) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        const hw = ctx.measureText(hintText).width + 20;
+        roundRect(ctx, W / 2 - hw / 2, H - 62, hw, 22, 6); ctx.fill();
+        ctx.fillStyle = info.scheme === 'onehand' ? '#ffd23f' : 'rgba(255,255,255,.7)';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillText(hintText, W / 2, H - 46);
+        ctx.restore();
+      }
+    }
+
     // 모바일: 핑/코인/점수/순위 를 좌상단(보조 버튼 아래)에 세로로. 상단 중앙은 체력/탄약이 씀.
     ctx.textAlign = 'left';
     // 아주 작은 화면에서는 더 좁게 간격 조정

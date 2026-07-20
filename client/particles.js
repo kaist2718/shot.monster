@@ -11,14 +11,16 @@ import { MobileSettings } from './mobile.js';
 
 // 품질 설정에 따라 파티클 수 선택
 // 우선순위: quality 설정 > 터치 여부
+// MobileSettings.load()가 호출되지 않았어도 기본값으로 동작
 function pcount(desktop, mobile) {
-  try {
-    const quality = MobileSettings.get('quality');
-    if (quality === 'low') return Math.ceil(mobile * 0.5);
-    if (quality === 'med') return Math.ceil((desktop + mobile) / 2);
-  } catch { /* quality 설정 무시, 기본값 사용 */ }
+  // quality가 설정되어 있지 않으면 기본값 사용 (null 반환 방지)
+  let quality = null;
+  try { quality = MobileSettings.get('quality'); } catch { /* 설정 불러오기 실패 */ }
+  if (quality === 'low') return Math.ceil(mobile * 0.5);
+  if (quality === 'med') return Math.ceil((desktop + mobile) / 2);
   // 'high' or default - Input.touch는 touch.js에서 설정되므로 안전하게 체크
-  return (Input.touch && Input.touch.enabled) ? mobile : desktop;
+  const touchEnabled = !!(Input.touch && Input.touch.enabled);
+  return touchEnabled ? mobile : desktop;
 }
 
 export class Particles {

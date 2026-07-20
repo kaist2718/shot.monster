@@ -21,6 +21,9 @@ Thumbs.db
 # Git
 .git/
 
+# Build output
+dist/
+
 # 테스트/임시 파일
 __tests__/
 *.test.js.bak

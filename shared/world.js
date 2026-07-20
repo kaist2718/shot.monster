@@ -40,13 +40,18 @@ export class Zone {
   }
 }
 
+// 상수: 맵 생성 매직 넘버 제거
+const OBSTACLE_TARGET = 52;
+const OBSTACLE_MAX_TRIES_MULT = 12;
+const SPAWN_CLEAR_RADIUS = 160;
+const OBSTACLE_SPACING = 20;
+
 // 맵 전체에 장애물 무작위 배치. 중앙 스폰은 비움. 각 장애물에 id 부여.
 export function generateWorld() {
   const obstacles = [];
-  const TARGET = 52;
   const spawnX = CONFIG.WORLD_SIZE / 2, spawnY = CONFIG.WORLD_SIZE / 2;
   let tries = 0;
-  while (obstacles.length < TARGET && tries < TARGET * 12) {
+  while (obstacles.length < OBSTACLE_TARGET && tries < OBSTACLE_TARGET * OBSTACLE_MAX_TRIES_MULT) {
     tries++;
     const type = pick(['tree', 'tree', 'tree', 'tree', 'rock', 'rock', 'crate', 'wall']);
     let w, h;
@@ -60,11 +65,11 @@ export function generateWorld() {
     const x = rand(60, CONFIG.WORLD_SIZE - w - 60);
     const y = rand(60, CONFIG.WORLD_SIZE - h - 60);
 
-    if (circleRect(spawnX, spawnY, 160, x, y, w, h)) continue;
+    if (circleRect(spawnX, spawnY, SPAWN_CLEAR_RADIUS, x, y, w, h)) continue;
     let overlap = false;
     for (const o of obstacles) {
-      if (x < o.x + o.w + 20 && x + w + 20 > o.x &&
-          y < o.y + o.h + 20 && y + h + 20 > o.y) { overlap = true; break; }
+      if (x < o.x + o.w + OBSTACLE_SPACING && x + w + OBSTACLE_SPACING > o.x &&
+          y < o.y + o.h + OBSTACLE_SPACING && y + h + OBSTACLE_SPACING > o.y) { overlap = true; break; }
     }
     if (overlap) continue;
 
@@ -83,30 +88,37 @@ export function generateWorld() {
 }
 
 
+// 상수: 픽업 생성 매직 넘버 제거
+const PICKUP_EDGE_PAD = 80;
+const PICKUP_SPAWN_CLEAR = 140;
+const PICKUP_OBSTACLE_PAD = 6;
+const PICKUP_MIN_SPACING = 70;
+const PICKUP_MAX_TRIES_MULT = 40;
+
 // 라운드 시작 시 바닥에 노출되는 픽업 배치.
 // 장애물/중앙 스폰 구역을 피하고, 서로 겹치지 않게 흩뿌린다.
 export function generatePickups(obstacles = [], count = 18) {
   const pickups = [];
   const TYPES = ['health', 'health', 'smg', 'smg', 'shotgun', 'pistol', 'grenade', 'grenade'];
-  const pad = 80;
   const spawnX = CONFIG.WORLD_SIZE / 2, spawnY = CONFIG.WORLD_SIZE / 2;
   let tries = 0;
-  while (pickups.length < count && tries < count * 40) {
+  while (pickups.length < count && tries < count * PICKUP_MAX_TRIES_MULT) {
     tries++;
-    const x = rand(pad, CONFIG.WORLD_SIZE - pad);
-    const y = rand(pad, CONFIG.WORLD_SIZE - pad);
+    const x = rand(PICKUP_EDGE_PAD, CONFIG.WORLD_SIZE - PICKUP_EDGE_PAD);
+    const y = rand(PICKUP_EDGE_PAD, CONFIG.WORLD_SIZE - PICKUP_EDGE_PAD);
     // 중앙 스폰 비우기
-    if (dist(x, y, spawnX, spawnY) < 140) continue;
+    if (dist(x, y, spawnX, spawnY) < PICKUP_SPAWN_CLEAR) continue;
     // 고체 장애물 안/너무 가깝지 않게
     let blocked = false;
     for (const o of obstacles) {
       if (!o.solid || o.destroyed) continue;
-      if (circleRect(x, y, 16, o.x - 6, o.y - 6, o.w + 12, o.h + 12)) { blocked = true; break; }
+      if (circleRect(x, y, 16, o.x - PICKUP_OBSTACLE_PAD, o.y - PICKUP_OBSTACLE_PAD,
+                     o.w + PICKUP_OBSTACLE_PAD * 2, o.h + PICKUP_OBSTACLE_PAD * 2)) { blocked = true; break; }
     }
     if (blocked) continue;
     // 픽업 간 최소 간격
     for (const pk of pickups) {
-      if (dist(x, y, pk.x, pk.y) < 70) { blocked = true; break; }
+      if (dist(x, y, pk.x, pk.y) < PICKUP_MIN_SPACING) { blocked = true; break; }
     }
     if (blocked) continue;
     pickups.push({ x, y, type: pick(TYPES) });

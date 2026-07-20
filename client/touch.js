@@ -7,8 +7,9 @@
 // ============================================================
 
 import { Input } from './input.js';
-import { dist, TAU, clamp } from '../shared/utils.js';
-import { CONFIG } from '../shared/config.js';
+import { dist, TAU, clamp, circleRect } from '../shared/utils.js';
+import { CONFIG, WEAPONS } from '../shared/config.js';
+import { Net } from './net.js';
 import { MobileSettings, SettingsPanel } from './mobile.js';
 import { Sound } from './sound.js';
 import { drawIcon } from './icons.js';
@@ -39,7 +40,17 @@ Input.touch = {
   casualTarget: null,   // 캐주얼 모드: 이동 목표 월드 좌표 {x,y}
 };
 
+// Safe area 캐싱: 모바일에서 화면 전환 시 성능 최적화
+let _safeInsetsCache = null;
+let _safeInsetsLastTime = 0;
+const SAFE_INSETS_CACHE_MS = 500; // 캐시 유지 시간
+
 function getSafeInsets() {
+  // 캐시 확인 (최근 500ms 이내이면 재사용)
+  const now = performance.now();
+  if (_safeInsetsCache && (now - _safeInsetsLastTime) < SAFE_INSETS_CACHE_MS) {
+    return _safeInsetsCache;
+  }
   try {
     const d = document.createElement('div');
     d.style.cssText = 'position:fixed;left:0;top:0;padding-top:env(safe-area-inset-top);' +
@@ -50,6 +61,8 @@ function getSafeInsets() {
     const v = (s) => parseFloat(cs.getPropertyValue(s)) || 0;
     const ins = { top: v('padding-top'), right: v('padding-right'), bottom: v('padding-bottom'), left: v('padding-left') };
     document.body.removeChild(d);
+    _safeInsetsCache = ins;
+    _safeInsetsLastTime = now;
     return ins;
   } catch { return { top: 0, right: 0, bottom: 0, left: 0 }; }
 }
@@ -91,6 +104,7 @@ export const TouchCtrl = {
   _pingStartTime: 0, // 핑 롱프레스 시작 시간
   _pingStarted: false, // 핑 진행 중
   _pingTouchId: null, // 핑 터치 ID
+  _layoutDirty: true, // 레이아웃 변경 필요 플래그 (매 프레임 재계산 방지)
 
   init(canvas, camera, opts = {}) {
     this._canvas = canvas;
@@ -113,6 +127,7 @@ export const TouchCtrl = {
     const refresh = () => this._refreshSafe();
     window.addEventListener('resize', refresh);
     window.addEventListener('orientationchange', refresh);
+    window.addEventListener('screenorientation', refresh); // orientation lock 변경 감지
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', refresh);
       window.visualViewport.addEventListener('scroll', refresh);
@@ -120,7 +135,7 @@ export const TouchCtrl = {
     document.body.classList.add('touch-capable');
   },
 
-  _refreshSafe() { this._safe = getSafeInsets(); },
+  _refreshSafe() { this._safe = getSafeInsets(); this._layoutDirty = true; },
 
   setCombatEnabled(on) {
     this._combatEnabled = !!on;
@@ -199,8 +214,8 @@ export const TouchCtrl = {
     this.buttonOrient  = { x: sX + sGap * 3, y: sY, r: r2 };
     this.buttonSettings= { x: sX + sGap * 4, y: sY, r: r2 };
     this.buttonAutoFire= { x: sX + sGap * 5, y: sY, r: r2 };
-    // 퀵챗 버튼 (상단 우측 보조줄)
-    this.buttonQuickChat = { x: sX + sGap * 5, y: sY, r: r2 };
+    // 퀵챗 버튼 (상단 우측 보조줄) - buttonAutoFire 다음에 배치
+    this.buttonQuickChat = { x: sX + sGap * 6, y: sY, r: r2 };
 
     this._btnR = r1;
     this._lefty = lefty;
@@ -316,6 +331,30 @@ export const TouchCtrl = {
         continue;
       }
 
+      // 한손 모드: 화면 아무 곳이나 터치 시 자동 플레이 활성화
+      if (scheme === 'onehand') {
+        if (this._inButton(t, this.buttonReload)) { Input.touch.reloadEdge = true; continue; }
+        if (this._inButton(t, this.buttonWeapon)) { if (this._onSwitchWeapon) this._onSwitchWeapon(); continue; }
+
+        // 수류탄 버튼
+        if (this._inButton(t, this._getGrenadeBtn()) && this._onThrowGrenade) {
+          this._grenadeId = t.identifier;
+          this._onThrowGrenade(t.clientX, t.clientY);
+          continue;
+        }
+
+        // 화면 아무 곳 터치 → 자동 모드 활성화 (moveId 설정하여 active=true로)
+        this._beginMove(t);
+        // 활성 상태를 즉시 설정 — _syncOnehand는 rAF 루프에서 self/entities와 함께 값을 설정
+        Input.touch.active = true;
+        Input.note('touch');
+        // 햅틱 피드백
+        if (MobileSettings.get('vibration') && typeof navigator.vibrate === 'function') {
+          try { navigator.vibrate(15); } catch { /* 무시 */ }
+        }
+        continue;
+      }
+
       // 듀얼 스틱 모드
       if (this._inButton(t, this.buttonReload))  { Input.touch.reloadEdge = true; continue; }
       if (this._inButton(t, this.buttonWeapon))  { if (this._onSwitchWeapon) this._onSwitchWeapon(); continue; }
@@ -345,9 +384,10 @@ export const TouchCtrl = {
       const pair = this._pinchPair(e);
       if (pair) this._beginPinch(pair);
     }
-    // 캐주얼 모드: _sync 생략 (main.js step()의 rAF에서 self 포함 호출)
-    // _onStart에서 _sync를 호출하면 self=undefined로 firing이 초기화됨
-    if (scheme !== 'casual') this._sync();
+    // 캐주얼/한손 모드: _sync 생략 (main.js step()의 rAF에서 self 포함 호출)
+    // _onStart에서 _sync를 호출하면 self/entities/mydId가 전달되지 않아
+    // _syncOnehand가 self=undefined로 움직임을 0으로 초기화함
+    if (scheme !== 'casual' && scheme !== 'onehand') this._sync();
   },
 
   _onMove(e) {
@@ -369,8 +409,8 @@ export const TouchCtrl = {
         }
       }
     }
-    // 캐주얼 모드: _sync 생략 (main.js step()의 rAF에서 처리)
-    if (scheme !== 'casual') this._sync();
+    // 캐주얼 모드 & 한손 모드: _sync 생략 (main.js step()의 rAF에서 처리)
+    if (scheme !== 'casual' && scheme !== 'onehand') this._sync();
   },
 
   _onEnd(e) {
@@ -415,6 +455,11 @@ export const TouchCtrl = {
       // 올바른 self 파라미터로 업데이트되므로, 여기서 호출하면 self=undefined로 firing이 false가 됨
       return;
     }
+    // 한손 모드: 터치 종료 시 자동 모드 해제 (다음 프레임에서 _syncOnehand가 정지 처리)
+    if (scheme === 'onehand') {
+      this._sync(); // 이동/발사 정지
+      return;
+    }
     this._sync();
   },
 
@@ -445,6 +490,12 @@ export const TouchCtrl = {
     // 캐주얼 모드: 원핑거 탭이동 + 자동조준/사격
     if (scheme === 'casual') {
       this._syncCasual(t, entities, myId, self);
+      return;
+    }
+
+    // 한손 모드: 완전 자동화 (터치 중일 때만 작동)
+    if (scheme === 'onehand') {
+      this._syncOnehand(t, entities, myId, self);
       return;
     }
 
@@ -494,8 +545,321 @@ export const TouchCtrl = {
     t.firing = this._combatEnabled && ((t.aiming && !separateFire) || (this._fireId !== null));
   },
 
-  // 캐주얼 모드: 탭한 지점으로 이동 목표 설정, 자동으로 적 추적 + 사격
+  // 한손 모드: 완전 자동화 플레이 (화면 터치 중일 때만 작동)
+  // 자동 조준/이동/사격/무기전환/수류탄 — 한손가락만으로도 게임 플레이 가능
+  _syncOnehand(t, entities, myId, self) {
+    const validEntities = Array.isArray(entities) ? entities : [];
+    // 터치가 있는지 확인 — 화면을 손가락으로 누르고 있는 동안 자동 모드
+    t.active = !!(this._moveId !== null || this._aimId !== null || this._fireId !== null);
+    t.sessionActive = t.active || t.reloadEdge;
+
+    if (!self || !self.alive || !t.active) {
+      // 터치가 없거나 플레이어가 죽었으면 정지
+      this._smoothMoveX = 0; this._smoothMoveY = 0;
+      t.moveX = 0; t.moveY = 0; t.aiming = false; t.firing = false; t.sprint = false;
+      return;
+    }
+
+    const ONEHAND = CONFIG.CONTROLS.ONEHAND;
+    const aggression = MobileSettings.get('onehandAggressiveness') || 0.7;
+    // 이동 smoothing 계수: 높을수록 반응 빠름, 낮을수록 부드러움
+    const SMOOTH_K = 0.35; // 0.30 → 0.35로 증가 (반응성 개선)
+    // 스트레이프 페이스: 프레임 카운터 기반으로 자연스러운 좌우 움직임 + 마이크로지터 제거
+    if (this._strafeTimer === undefined) this._strafeTimer = 0;
+    this._strafeTimer = (this._strafeTimer + 1) % 600; // ~10초 주기 (60fps 기준)
+    const now = performance.now();
+
+    // 1. 최적 타겟 선택 (위협도 기반) — 타겟 락으로 빠른 전환 방지
+    let target = null;
+    if (MobileSettings.get('onehandAutoAim')) {
+      target = this._findBestTarget(validEntities, myId, self);
+      // 타겟 락: 현재 락된 타겟이 여전히 유효하고 멀지 않으면 유지
+      if (this._lockedTargetId != null) {
+        const locked = validEntities.find((e) => e.id === this._lockedTargetId && e.alive);
+        if (locked) {
+          const dToLocked = dist(locked.x, locked.y, self.x, self.y);
+          const dToBest = target ? dist(target.x, target.y, self.x, self.y) : Infinity;
+          // 베스트가 현재 락보다 20% 이상 가깝지 않으면 락 유지
+          if (dToLocked < dToBest * 1.2 && dToLocked < 500) {
+            target = locked;
+          }
+        }
+      }
+      this._lockedTargetId = target ? target.id : null;
+    } else {
+      this._lockedTargetId = null;
+    }
+
+    // 2. 자동 조준 — 타겟이 있으면 예측 조준 (부드러운 보간 적용)
+    let rawAimX = 0, rawAimY = 0;
+    let shouldAim = false;
+    if (target && MobileSettings.get('onehandAutoAim')) {
+      const d = dist(target.x, target.y, self.x, self.y);
+      const weapon = WEAPONS[self.weaponKey] || WEAPONS.pistol;
+      const tof = d / weapon.bulletSpeed;
+      const leadFactor = ONEHAND.PREDICT_LEAD_FACTOR;
+      const px = target.x + (target.vx || 0) * tof * leadFactor;
+      const py = target.y + (target.vy || 0) * tof * leadFactor;
+      const aimAng = Math.atan2(py - self.y, px - self.x);
+      rawAimX = Math.cos(aimAng);
+      rawAimY = Math.sin(aimAng);
+      shouldAim = true;
+    } else if (target) {
+      const aimAng = Math.atan2(target.y - self.y, target.x - self.x);
+      rawAimX = Math.cos(aimAng);
+      rawAimY = Math.sin(aimAng);
+      shouldAim = true;
+    }
+    // 조준 방향 지수 평활화 (높은 계수로 빠른 반응 + 미세지터 제거)
+    const AIM_SMOOTH_K = 0.50;
+    if (this._smoothAimX === undefined) {
+      this._smoothAimX = rawAimX || Math.cos(self.angle);
+      this._smoothAimY = rawAimY || Math.sin(self.angle);
+    }
+    if (shouldAim) {
+      this._smoothAimX += (rawAimX - this._smoothAimX) * AIM_SMOOTH_K;
+      this._smoothAimY += (rawAimY - this._smoothAimY) * AIM_SMOOTH_K;
+      const aimLen = Math.hypot(this._smoothAimX, this._smoothAimY);
+      if (aimLen > 0.01) {
+        t.aimX = this._smoothAimX / aimLen;
+        t.aimY = this._smoothAimY / aimLen;
+      } else {
+        t.aimX = rawAimX;
+        t.aimY = rawAimY;
+      }
+      t.aiming = true;
+    } else {
+      const moveLen = Math.hypot(t.moveX || 0, t.moveY || 0);
+      if (moveLen > 0.1) {
+        t.aimX = t.moveX; t.aimY = t.moveY;
+      } else {
+        t.aimX = Math.cos(self.angle); t.aimY = Math.sin(self.angle);
+      }
+      t.aiming = moveLen > 0.1;
+    }
+
+    // 3. 자동 이동 — 존/장애물 회피, 타겟 추적/회피
+    let rawMoveX = 0, rawMoveY = 0;
+    let shouldSprint = false;
+
+    if (MobileSettings.get('onehandAutoMove')) {
+      // 3-1. 존 회피 (최우선) — 히스테리시스로 플립플랍 방지
+      const zoneCenter = {
+        x: this._zoneCenterX != null ? this._zoneCenterX : CONFIG.WORLD_SIZE / 2,
+        y: this._zoneCenterY != null ? this._zoneCenterY : CONFIG.WORLD_SIZE / 2,
+      };
+      const distToZoneCenter = dist(self.x, self.y, zoneCenter.x, zoneCenter.y);
+      const estimatedZoneRadius = this._latestZoneRadius || (CONFIG.WORLD_SIZE * 0.4);
+      const zoneEdgeDist = estimatedZoneRadius - distToZoneCenter;
+      const ZONE_AVOID_IN = ONEHAND.OBSTACLE_AVOID_DIST * 2;      // 진입 (120px)
+      const ZONE_AVOID_OUT = ONEHAND.OBSTACLE_AVOID_DIST * 3;     // 이탈 (180px) — 히스테리시스
+
+      if (this._zoneAvoidActive === undefined) this._zoneAvoidActive = false;
+      if (!this._zoneAvoidActive && zoneEdgeDist < ZONE_AVOID_IN) this._zoneAvoidActive = true;
+      else if (this._zoneAvoidActive && zoneEdgeDist > ZONE_AVOID_OUT) this._zoneAvoidActive = false;
+
+      if (this._zoneAvoidActive) {
+        // 존 경계에 가까우면 존 중심으로 이동
+        const toCenterX = zoneCenter.x - self.x;
+        const toCenterY = zoneCenter.y - self.y;
+        const toCenterLen = Math.hypot(toCenterX, toCenterY);
+        if (toCenterLen > 10) {
+          rawMoveX = toCenterX / toCenterLen;
+          rawMoveY = toCenterY / toCenterLen;
+          shouldSprint = true;
+        }
+      } else if (target) {
+        // 3-2. 타겟 기반 이동 (공격성에 따라 거리 결정)
+        const d = dist(target.x, target.y, self.x, self.y);
+        const weapon = WEAPONS[self.weaponKey] || WEAPONS.pistol;
+        const optimalRange = this._getOptimalRange(weapon, aggression);
+
+        const dx = target.x - self.x;
+        const dy = target.y - self.y;
+        const toTargetLen = Math.hypot(dx, dy);
+
+        if (d > optimalRange * 1.2) {
+          // 너무 멀면 접근
+          rawMoveX = dx / toTargetLen;
+          rawMoveY = dy / toTargetLen;
+          shouldSprint = aggression > 0.5;
+        } else if (d < optimalRange * 0.5) {
+          // 너무 가까우면 후퇴 + 스트레이프
+          const retreatX = -dx / toTargetLen;
+          const retreatY = -dy / toTargetLen;
+          // 스트레이프 방향: target.id 기반 시드 + 프레임 카운터로 부드럽게
+          const strafeSeed = target.id != null ? target.id : 0;
+          const strafePhase = (strafeSeed + Math.floor(this._strafeTimer / 200)) % 2 === 0 ? 1 : -1;
+          const perpX = -dy / toTargetLen * strafePhase;
+          const perpY = dx / toTargetLen * strafePhase;
+          rawMoveX = retreatX * 0.3 + perpX * 0.7;
+          rawMoveY = retreatY * 0.3 + perpY * 0.7;
+          shouldSprint = true;
+        } else {
+          // 적정 거리: 스트레이프 (좌우 움직이며 회피) — 프레임 카운터 기반
+          const strafeSeed = target.id != null ? target.id : 0;
+          const strafePhase = (strafeSeed + Math.floor(this._strafeTimer / 200)) % 2 === 0 ? 1 : -1;
+          const perpX = -dy / toTargetLen * strafePhase;
+          const perpY = dx / toTargetLen * strafePhase;
+          rawMoveX = perpX;
+          rawMoveY = perpY;
+        }
+
+        // 장애물 회피: 장애물 근처일 때만 회피 방향 캐싱 (프레임당 지터 방지)
+        if (rawMoveX !== 0 || rawMoveY !== 0) {
+          const avoidDir = this._getCachedAvoidDir(self.x, self.y, rawMoveX, rawMoveY, now);
+          rawMoveX = avoidDir.nx;
+          rawMoveY = avoidDir.ny;
+        }
+      } else if (MobileSettings.get('onehandAutoAim') === false) {
+        rawMoveX = 0; rawMoveY = 0;
+      } else {
+        // 타겟 없음 — 존 중심으로 천천히 이동하며 대기
+        const toCenterX = zoneCenter.x - self.x;
+        const toCenterY = zoneCenter.y - self.y;
+        const toCenterLen = Math.hypot(toCenterX, toCenterY);
+        if (toCenterLen > 100) {
+          rawMoveX = (toCenterX / toCenterLen) * 0.5;
+          rawMoveY = (toCenterY / toCenterLen) * 0.5;
+        }
+      }
+    }
+
+    // 지수 평활화(Exponential Smoothing)로 부드러운 이동 구현
+    if (this._smoothMoveX === undefined) {
+      this._smoothMoveX = 0;
+      this._smoothMoveY = 0;
+    }
+    this._smoothMoveX += (rawMoveX - this._smoothMoveX) * SMOOTH_K;
+    this._smoothMoveY += (rawMoveY - this._smoothMoveY) * SMOOTH_K;
+    // 미세 움직임이 남아있으면 0으로 클리어
+    if (Math.abs(this._smoothMoveX) < 0.01 && rawMoveX === 0) this._smoothMoveX = 0;
+    if (Math.abs(this._smoothMoveY) < 0.01 && rawMoveY === 0) this._smoothMoveY = 0;
+
+    t.moveX = clamp(this._smoothMoveX, -1, 1);
+    t.moveY = clamp(this._smoothMoveY, -1, 1);
+    t.sprint = shouldSprint;
+
+    // 4. 자동 무기 전환 (거리 기반)
+    if (MobileSettings.get('onehandAutoWeapon') && target && self.ownedWeapons) {
+      const d = dist(target.x, target.y, self.x, self.y);
+      const owned = Array.isArray(self.ownedWeapons) ? self.ownedWeapons : [...self.ownedWeapons];
+
+      // 거리별 최적 무기
+      if (d < 150 && owned.includes('shotgun')) {
+        this._switchToWeapon('shotgun');
+      } else if (d < 350 && owned.includes('smg')) {
+        this._switchToWeapon('smg');
+      } else if (d >= 350 && owned.includes('pistol')) {
+        this._switchToWeapon('pistol');
+      }
+    }
+
+    // 5. 자동 사격 — 타겟이 유효 사거리 내에 있으면 사격
+    if (target && t.aiming && MobileSettings.get('autoFire') !== false) {
+      const d = dist(target.x, target.y, self.x, self.y);
+      const effectiveRange = this._getEffectiveRange(self.weaponKey);
+      t.firing = d < effectiveRange;
+    } else {
+      t.firing = false;
+    }
+
+    // 6. 자동 수류탄 (쿨다운 기반)
+    if (MobileSettings.get('onehandAutoGrenade') && self.grenadeCount > 0 && target) {
+      const d = dist(target.x, target.y, self.x, self.y);
+      const now = performance.now() * 0.001;
+      if (!this._lastGrenadeTime) this._lastGrenadeTime = 0;
+      if (d >= ONEHAND.AUTO_GRENADE_MIN_DIST && d <= ONEHAND.AUTO_GRENADE_MAX_DIST
+          && now - this._lastGrenadeTime > ONEHAND.AUTO_GRENADE_COOLDOWN
+          && self.health > self.maxHealth * 0.3) {
+        this._onThrowGrenade && this._onThrowGrenade(0, 0);
+        this._lastGrenadeTime = now;
+      }
+    }
+  },
+
+  // 한손/캐주얼 모드용 무기 최적 사거리 (공격성 반영)
+  _getOptimalRange(weapon, aggression) {
+    const baseRange = this._getEffectiveRange(weapon.name ? weapon.name.toLowerCase() : 'pistol');
+    // 공격성이 높으면 근접, 낮으면 원거리 유지
+    return baseRange * (1.2 - 0.4 * aggression);
+  },
+
+  // 무기 전환 헬퍼 (한손 모드용) — 서버에 특정 무기로 전환 요청
+  _switchToWeapon(key) {
+    if (this._lastWeaponSwitch !== key) {
+      Net.sendSwitchWeapon(key);
+      this._lastWeaponSwitch = key;
+    }
+  },
+
+  // 존 정보 업데이트 (main.js에서 zone snapshot 수신 시 호출)
+  _zoneCenterX: null,
+  _zoneCenterY: null,
+  _obstacles: [],
+  updateZoneInfo(cx, cy, r) {
+    this._zoneCenterX = cx;
+    this._zoneCenterY = cy;
+    this._latestZoneRadius = r;
+  },
+  // 장애물 정보 업데이트 (main.js step()에서 월드 장애물 전달)
+  updateObstacles(obs) {
+    this._obstacles = obs || [];
+  },
+
+  // 장애물 회피: (x,y)에서 방향 (nx,ny)로 이동 시 장애물과 충돌하는지 확인
+  _isBlocked(x, y, nx, ny) {
+    const lookahead = CONFIG.PLAYER_RADIUS * 3;
+    const testX = x + nx * lookahead;
+    const testY = y + ny * lookahead;
+    for (const o of this._obstacles) {
+      if (o.solid && circleRect(testX, testY, CONFIG.PLAYER_RADIUS, o.x, o.y, o.w, o.h)) return true;
+    }
+    return false;
+  },
+
+  // 장애물 회피 방향 탐색: 선호 방향 → 직각 방향 → 원래 방향 (서버 충돌 해결에 의존)
+  _findAvoidanceDir(x, y, nx, ny) {
+    if (!nx && !ny) return { nx: 0, ny: 0 };
+    // 선호 방향 먼저 시도
+    if (!this._isBlocked(x, y, nx, ny)) return { nx, ny };
+    // 좌/우 스트레이프 시도
+    for (const sign of [1, -1]) {
+      const strafeNx = -ny * sign;
+      const strafeNy = nx * sign;
+      if (!this._isBlocked(x, y, strafeNx, strafeNy)) {
+        return { nx: strafeNx, ny: strafeNy };
+      }
+    }
+    // 반대 방향 시도
+    if (!this._isBlocked(x, y, -nx, -ny)) return { nx: -nx, ny: -ny };
+    // 모두 막혀도 원래 방향으로 진행 — 서버/클라 예측의 충돌 해결이 wall sliding 처리
+    return { nx, ny };
+  },
+
+  // 장애물 회피 방향 캐싱: 마지막 결과를 캐싱하여 프레임당 지터 방지
+  // 위치가 크게 변했거나 쿨다운이 지나면 재계산, 그렇지 않으면 캐시된 방향 유지
+  _getCachedAvoidDir(x, y, nx, ny, now) {
+    if (!this._avoidCache) this._avoidCache = { nx: 0, ny: 0, lastX: 0, lastY: 0, lastTime: 0 };
+    const c = this._avoidCache;
+    const moved = Math.hypot(x - c.lastX, y - c.lastY) > 15; // 15px 이상 이동 시 재계산
+    const expired = now - c.lastTime > 200; // 200ms 마다 재계산
+    if (moved || expired) {
+      const result = this._findAvoidanceDir(x, y, nx, ny);
+      c.nx = result.nx;
+      c.ny = result.ny;
+      c.lastX = x;
+      c.lastY = y;
+      c.lastTime = now;
+    }
+    return { nx: c.nx, ny: c.ny };
+  },
+
+  // 캐주얼 모드: 탭한 지점으로 이동 목표 설정, 자동으로 적 추적 + 사격 (고도화 v2)
+  // 개선: 위협도 기반 타겟팅, 무기별 최적 사거리, 예측 조준, 자동 무기 전환
   _syncCasual(t, entities, myId, self) {
+    // 방어적 체크: entities 배열이 유효한 경우에만 처리
+    const validEntities = Array.isArray(entities) ? entities : [];
     t.active = this._casualTapActive || (this._casualTarget !== null);
     t.sessionActive = t.active || t.reloadEdge;
 
@@ -511,22 +875,29 @@ export const TouchCtrl = {
       } else {
         t.moveX = 0;
         t.moveY = 0;
-        // 목표 도달 시 타겟 클리어 (main.js 에서도 처리하지만 여기서도 처리)
         this._casualTarget = null;
       }
 
-      // 자동 조준: 가장 가까운 적 찾기 (봇/인간 모두)
+      // 자동 조준: 위협도 기반 최적 타겟 선정 + 예측 조준
       if (MobileSettings.get('aimAssist')) {
-        const nearest = this._findNearestEnemy(entities, myId, self);
-        if (nearest) {
-          const aimAng = Math.atan2(nearest.y - self.y, nearest.x - self.x);
+        const target = this._findBestTarget(validEntities, myId, self);
+        if (target) {
+          // 예측 조준: 타겟 속도 기반으로 선도 사격
+          const d = dist(target.x, target.y, self.x, self.y);
+          const weapon = WEAPONS[self.weaponKey] || WEAPONS.pistol;
+          const tof = d / weapon.bulletSpeed; // 탄 비행 시간
+          const leadFactor = 0.6; // 캐주얼 보정 (완벽하지 않게)
+          const px = target.x + (target.vx || 0) * tof * leadFactor;
+          const py = target.y + (target.vy || 0) * tof * leadFactor;
+
+          const aimAng = Math.atan2(py - self.y, px - self.x);
           t.aimX = Math.cos(aimAng);
           t.aimY = Math.sin(aimAng);
           t.aiming = true;
 
-          // 자동 사격: 적이 사거리 내에 있으면 사격
-          const shootRange = 430;
-          if (MobileSettings.get('autoFire') && dist(nearest.x, nearest.y, self.x, self.y) < shootRange) {
+          // 무기별 최적 사거리로 자동 사격 판정
+          const effectiveRange = this._getEffectiveRange(self.weaponKey);
+          if (MobileSettings.get('autoFire') && d < effectiveRange) {
             t.firing = true;
           } else {
             t.firing = false;
@@ -547,6 +918,30 @@ export const TouchCtrl = {
         }
         t.firing = false;
       }
+    } else if (self && self.alive) {
+      // 이동 목표 없지만 생존 중 — 자동 탐색 모드 (적 발견 시 자동 교전)
+      if (MobileSettings.get('autoFire') && MobileSettings.get('aimAssist')) {
+        const target = this._findBestTarget(validEntities, myId, self);
+        if (target) {
+          const d = dist(target.x, target.y, self.x, self.y);
+          const effectiveRange = this._getEffectiveRange(self.weaponKey);
+          const weapon = WEAPONS[self.weaponKey] || WEAPONS.pistol;
+          const tof = d / weapon.bulletSpeed;
+          const px = target.x + (target.vx || 0) * tof * 0.5;
+          const py = target.y + (target.vy || 0) * tof * 0.5;
+          const aimAng = Math.atan2(py - self.y, px - self.x);
+          t.aimX = Math.cos(aimAng);
+          t.aimY = Math.sin(aimAng);
+          t.aiming = true;
+          t.firing = d < effectiveRange * 0.8; // 더 보수적 사거리 (이동 중)
+        } else {
+          t.moveX = 0; t.moveY = 0;
+          t.aiming = false; t.firing = false;
+        }
+      } else {
+        t.moveX = 0; t.moveY = 0;
+        t.aiming = false; t.firing = false;
+      }
     } else {
       t.moveX = 0;
       t.moveY = 0;
@@ -558,22 +953,47 @@ export const TouchCtrl = {
     t.sprint = !!(this._runToggle && MobileSettings.get('runButton'));
   },
 
-  _findNearestEnemy(entities, myId, self) {
-    let nearest = null;
-    let minDist = Infinity;
-
-    // 사거리 내 모든 적 (봇 + 인간 모두 타겟)
-    const shootRange = 430;
-    for (const e of entities) {
-      if (e.id === myId || !e.alive) continue;
-      // 모든 생존 엔티티를 적으로 간주 (봇/인간 구분 없음)
-      const d = dist(e.x, e.y, self.x, self.y);
-      if (d < minDist && d < shootRange) {
-        minDist = d;
-        nearest = e;
-      }
+  // 무기별 유효 사거리 (자동발사 사거리 판정용)
+  _getEffectiveRange(weaponKey) {
+    switch (weaponKey) {
+      case 'shotgun': return 200;  // 샷건: 근거리
+      case 'smg': return 350;      // SMG: 중거리
+      case 'pistol': return 430;   // 권총: 원거리
+      default: return 430;
     }
-    return nearest;
+  },
+
+  // 위협도 기반 타겟팅: 거리 + 체력 + 이동방향 종합 평가
+  _findBestTarget(entities, myId, self) {
+    let bestTarget = null;
+    let bestScore = Infinity;
+    const validEntities = Array.isArray(entities) ? entities : [];
+    const maxRange = 500; // 탐색 범위
+
+    for (const e of validEntities) {
+      if (e.id === myId || !e.alive) continue;
+      const d = dist(e.x, e.y, self.x, self.y);
+      if (d > maxRange) continue;
+
+      // 위협도 스코어: 낮을수록 우선 타겟
+      let score = d;
+      // 저체력 적 선호 (처치하기 쉬운)
+      if (e.health < e.maxHealth * 0.4) score *= 0.7;
+      // 나를 향해 이동하는 적 가산 (직접적 위협)
+      if (e.vx || e.vy) {
+        const moveAng = Math.atan2(e.vy || 0, e.vx || 0);
+        const toSelfAng = Math.atan2(self.y - e.y, self.x - e.x);
+        const angDiff = Math.abs(Math.atan2(Math.sin(moveAng - toSelfAng), Math.cos(moveAng - toSelfAng)));
+        if (angDiff < 0.5) score *= 0.8;
+      }
+      if (score < bestScore) { bestScore = score; bestTarget = e; }
+    }
+    return bestTarget;
+  },
+
+  // 하위 호환용 (기존 _findNearestEnemy 유지)
+  _findNearestEnemy(entities, myId, self) {
+    return this._findBestTarget(entities, myId, self);
   },
 
   // 캐주얼 모드 타겟 설정
@@ -610,8 +1030,7 @@ export const TouchCtrl = {
     const pad = minD < 500 ? 12 : 16;
     const mx = W - size - pad;
     const my = pad;
-    const worldSize = 2400;
-    const scale = size / worldSize;
+    const scale = size / CONFIG.WORLD_SIZE;
     const wx = (clientX - mx) / scale;
     const wy = (clientY - my) / scale;
     this._onMapPing(wx, wy, 'here');
@@ -620,9 +1039,8 @@ export const TouchCtrl = {
   // 퀵챗 패널 토글
   _toggleQuickChat() {
     this._quickChatOpen = !this._quickChatOpen;
-    if (!this._quickChatOpen) {
-      this._removeQuickChatPanel();
-    }
+    if (this._quickChatOpen) this._showQuickChatPanel();
+    else this._removeQuickChatPanel();
   },
 
   _removeQuickChatPanel() {
@@ -697,19 +1115,30 @@ export const TouchCtrl = {
 
   endFrame() { Input.touch.reloadEdge = false; },
 
-  // 수류탄 버튼 위치 계산 (화면 좌표)
+  // 수류탄 버튼 위치 계산 (화면 좌표) — 반응형으로 다른 버튼과 겹침 방지
   _getGrenadeBtn() {
     const W = window.innerWidth;
     const H = window.innerHeight;
     const safeRight = this._safe?.right || 0;
     const safeBottom = this._safe?.bottom || 0;
-    const r = 34;
+    const minD = Math.min(W, H);
+    // 작은 화면에서는 더 작은 버튼
+    const r = minD < 500 ? 28 : 34;
+    // 듀얼 스틱 모드: action 버튼 상단에 배치 (겹침 방지)
+    // 캐주얼 모드: 우하단 고정
+    const scheme = MobileSettings.get('scheme') || 'dual';
+    if (scheme === 'dual') {
+      // action 버튼들 위쪽에 위치 (리로드 버튼 위로)
+      const y = H - r - 26 - safeBottom - (r * 2 + (minD < 500 ? 8 : 14)) * 2.5;
+      return { x: W - r - 16 - safeRight, y: Math.min(y, H - r * 5 - safeBottom), r };
+    }
     return { x: W - r - 16 - safeRight, y: H - r - 16 - safeBottom, r };
   },
 
   draw(ctx, opts = {}) {
     if (!Input.touch.enabled) return;
-    this._layout();
+    // dirty 플래그로 _layout() 호출 최소화 — 매 프레임 계산 대신 이벤트 기반 갱신
+    if (this._layoutDirty || !this._moveBase) { this._layout(); this._layoutDirty = false; }
     const opa = clamp(Number(MobileSettings.get('stickOpacity')) || 0.85, 0.35, 1);
     const showCombat = opts.combat !== false && this._combatEnabled;
     const showAux = opts.aux !== false;
@@ -718,6 +1147,25 @@ export const TouchCtrl = {
 
     ctx.save();
     ctx.globalAlpha = opa;
+
+    // 한손 모드: 대부분의 버튼 숨김 (설정, 줌, 수류탄만 남김)
+    if (scheme === 'onehand') {
+      if (showAux) {
+        this._drawButton(ctx, this.buttonZoomOut, 'zoomOut', Input.touch.zoomOut, 'minor');
+        this._drawButton(ctx, this.buttonZoomIn,  'zoomIn',  Input.touch.zoomIn, 'minor');
+        this._drawButton(ctx, this.buttonSettings,'settings', SettingsPanel.isOpen(), 'minor');
+      }
+      // 수류탄 버튼 (생존자 + 보유 수류탄 있음)
+      if (showCombat && self && self.alive && self.grenadeCount > 0) {
+        this._drawGrenadeButton(ctx, true);
+      }
+      // 자동 모드 인디케이터
+      if (showCombat) {
+        this._drawOnehandIndicator(ctx, showCombat && self && self.alive && Input.touch.active);
+      }
+      ctx.restore();
+      return;
+    }
 
     if (showAux) {
       this._drawButton(ctx, this.buttonZoomOut, 'zoomOut', Input.touch.zoomOut, 'minor');
@@ -757,6 +1205,55 @@ export const TouchCtrl = {
     // 캐주얼 모드: 타겟 마커
     if (showCombat && scheme === 'casual' && this._casualTarget) {
       this._drawCasualTarget(ctx, this._casualTarget);
+    }
+
+    // 한손 모드: 자동 플레이 표시 + 활성 터치 표시
+    if (showCombat && scheme === 'onehand') {
+      this._drawOnehandIndicator(ctx, showCombat && self && self.alive && Input.touch.active);
+    }
+
+    ctx.restore();
+  },
+
+  // 한손 모드 시각적 표시
+  _drawOnehandIndicator(ctx, isActive) {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const safeBottom = this._safe.bottom || 0;
+
+    // 화면 하단 중앙에 인디케이터
+    const cx = W / 2;
+    const cy = H - 32 - safeBottom;
+    const pulse = 0.7 + 0.3 * Math.sin(performance.now() * 0.005);
+
+    ctx.save();
+
+    // 배경 캡슐
+    const capsuleW = 80;
+    const capsuleH = 20;
+    ctx.fillStyle = isActive ? `rgba(255, 210, 63, ${0.15 * pulse})` : 'rgba(100, 100, 100, 0.15)';
+    ctx.beginPath();
+    ctx.roundRect(cx - capsuleW / 2, cy - capsuleH / 2, capsuleW, capsuleH, capsuleH / 2);
+    ctx.fill();
+
+    // 테두리
+    ctx.strokeStyle = isActive ? `rgba(255, 210, 63, ${0.5 * pulse})` : 'rgba(150, 150, 150, 0.3)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // 텍스트
+    ctx.fillStyle = isActive ? `rgba(255, 210, 63, ${pulse})` : 'rgba(200, 200, 200, 0.7)';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(isActive ? 'AUTO' : 'TOUCH', cx, cy);
+
+    // 활성 상태 점 표시 (좌측)
+    if (isActive) {
+      ctx.fillStyle = `rgba(100, 255, 100, ${pulse})`;
+      ctx.beginPath();
+      ctx.arc(cx - capsuleW / 2 + 10, cy, 3, 0, TAU);
+      ctx.fill();
     }
 
     ctx.restore();

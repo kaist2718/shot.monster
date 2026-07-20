@@ -62,9 +62,31 @@ html, body {
   box-shadow: 0 0 0 3px rgba(255,210,63,0.15);
 }
 
-/* 터치 가능 기기: safe-area 여백 유틸 */
+/* 터치 가능 기기: safe-area 여백 유틸 + 최신 모바일 최적화 */
 body.touch-capable {
   /* mute 등은 인라인+env 로 배치. 여기선 선택자 훅만. */
+  /* 모바일 브라우저 주소창 동적 높이 대응: dvh 사용 */
+  height: 100dvh;
+  /* iOS Safari에서 탭 highlight 더 철저히 제거 */
+  -webkit-tap-highlight-color: transparent;
+  /* 터치 지연 최소화 */
+  touch-action: manipulation;
+}
+
+/* 퀵챗/설정 패널 — 최신 모바일 UI 트렌드 반영 */
+#quickchat-panel {
+  animation: panel-slideup 0.2s ease-out;
+}
+@keyframes panel-slideup {
+  from { opacity: 0; transform: translate(-50%, 60%); }
+  to { opacity: 1; transform: translate(-50%, 50%); }
+}
+#quickchat-panel button {
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+#quickchat-panel button:active {
+  transform: scale(0.92);
+  background: rgba(255,210,63,0.3) !important;
 }
 
 /* 접근성: 포커스 링 */
@@ -86,4 +108,36 @@ button svg {
 #mode-screen button:hover > div:first-child {
   background: rgba(0,0,0,0.20);
   transform: scale(1.05);
+}
+
+/* 최신 모바일 트렌드: 저전력/접근성 모드 감지 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 고대비 모드 대응 */
+@media (prefers-contrast: high) {
+  button:focus-visible {
+    outline: 3px solid #ffd23f;
+    outline-offset: 3px;
+  }
+}
+
+/* 작은 화면(iPhone SE, 소형 Android) 추가 최적화 */
+@media (max-width: 380px), (max-height: 680px) {
+  #start-screen input, #mode-screen button, #room-screen button {
+    font-size: 13px !important;
+  }
+}
+
+/* 태블릿/큰 화면 최적화 */
+@media (min-width: 768px) and (min-height: 768px) {
+  #game {
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+  }
 }
