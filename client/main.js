@@ -59,7 +59,7 @@ let gameProfile = null;
 let pageHidden = false;
 let lastCursor = '';
 let serverFullMsg = false;
-let preferTouchUi = false;      // HUD/스틱 표시용(hysteresis)
+let preferTouchUi = !!(Input.touch && Input.touch.enabled);  // HUD/스틱 표시용(hysteresis)
 let hintAge = 0;
 
 // 미니맵 핑 / 퀵챗 표시
