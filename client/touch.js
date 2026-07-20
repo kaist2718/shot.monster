@@ -329,13 +329,16 @@ export const TouchCtrl = {
       const pair = this._pinchPair(e);
       if (pair) this._beginPinch(pair);
     }
-    this._sync();
+    // 캐주얼 모드: _sync 생략 (main.js step()의 rAF에서 self 포함 호출)
+    // _onStart에서 _sync를 호출하면 self=undefined로 firing이 초기화됨
+    if (scheme !== 'casual') this._sync();
   },
 
   _onMove(e) {
     e.preventDefault();
     Input.note('touch');
     if (this._pinchActive) { this._updatePinch(e); return; }
+    const scheme = MobileSettings.get('scheme') || 'dual';
     for (const t of e.changedTouches) {
       if (t.identifier === this._moveId) { this._moveCX = t.clientX; this._moveCY = t.clientY; }
       else if (t.identifier === this._aimId) { this._aimCX = t.clientX; this._aimCY = t.clientY; }
@@ -350,7 +353,8 @@ export const TouchCtrl = {
         }
       }
     }
-    this._sync();
+    // 캐주얼 모드: _sync 생략 (main.js step()의 rAF에서 처리)
+    if (scheme !== 'casual') this._sync();
   },
 
   _onEnd(e) {
@@ -391,6 +395,9 @@ export const TouchCtrl = {
     const scheme = MobileSettings.get('scheme') || 'dual';
     if (scheme === 'casual') {
       this._casualTapActive = false;
+      // _sync 호출 생략 — main.js step()의 rAF 루프에서 _sync(latest.entities, Net.yourId, self)로
+      // 올바른 self 파라미터로 업데이트되므로, 여기서 호출하면 self=undefined로 firing이 false가 됨
+      return;
     }
     this._sync();
   },
