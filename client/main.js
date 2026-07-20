@@ -288,16 +288,29 @@ function initNet() {
       activeEmotes.push({ name: e.name, type: e.type, ttl: 2.5 });
       if (activeEmotes.length > 8) activeEmotes.shift();
     },
+    onPlayerResult: (e) => {
+      // gameProfile에 경기 결과 저장 (UI 표시용)
+      if (e.id === Net.yourId) {
+        gameProfile = { ...gameProfile, lastResult: e };
+      }
+    },
+    onExplosion: (e) => {
+      // 폭발 파티클 효과
+      particles.explosion(e.x, e.y, e.r || 96);
+      shake = Math.min(20, shake + 6);
+      Sound.play('shotgun', 0, 0.8); // 폭발음 대용
+    },
   }, gameProfile, 'multi');
 }
 
-// 무기 키 — 폼/오버레이 가드
+// 무기 키 + 수류탄 — 폼/오버레이 가드
 window.addEventListener('keydown', (e) => {
   if (isFormEl(e.target) || isUiBlocking()) return;
   const k = e.key.toLowerCase();
   if (k === '1') Net.sendSwitchWeapon('pistol');
   else if (k === '2') Net.sendSwitchWeapon('smg');
   else if (k === '3') Net.sendSwitchWeapon('shotgun');
+  else if (k === 'g') { if (self && self.alive && self.grenadeCount > 0) Net.throwGrenade(); }
 });
 
 function useTouchContract() {

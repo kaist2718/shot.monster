@@ -610,7 +610,7 @@ httpServer.on('error', (err) => {
 // Redis 초기화 후 서버 시작
 initRedis().then(() => {
   httpServer.listen(PORT, () => {
-    console.log(`Surviv BR server on http://localhost:${PORT}`);
+    console.log(`shot.monster server on http://localhost:${PORT}`);
   });
 }).catch((e) => {
   console.error('서버 시작 실패:', e.message);

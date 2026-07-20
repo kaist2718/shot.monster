@@ -6,5 +6,5 @@
 # ============================================================
 set -e
 cd "$(dirname "$0")"
-echo "Starting Surviv BR (one-click)..."
+echo "Starting shot.monster (one-click)..."
 node launch.js "$@"

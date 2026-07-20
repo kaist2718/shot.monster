@@ -55,7 +55,7 @@ const DICT = {
   humans:          { en: '{n}/{m}', ko: '{n}/{m}' },
 
   // HUD
-  hintDesktop:     { en: 'WASD · Mouse · Click/Space fire · R · Shift · 1/2/3 · Gamepad OK', ko: 'WASD · 마우스 · 클릭/스페이스 사격 · R · Shift · 1/2/3 · 게임패드' },
+  hintDesktop:     { en: 'WASD · Mouse · Click/Space fire · R · G grenade · Shift · 1/2/3 · Gamepad OK', ko: 'WASD · 마우스 · 클릭/스페이스 사격 · R · G 수류탄 · Shift · 1/2/3 · 게임패드' },
   ping:            { en: 'Ping {n}ms', ko: '핑 {n}ms' },
   coins:           { en: 'Coins {n}', ko: '코인 {n}' },
   alive:           { en: 'Alive {n}', ko: '생존자 {n}' },

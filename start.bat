@@ -16,7 +16,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Starting Surviv BR ...
+echo Starting shot.monster ...
 echo The server runs in this window and your browser opens at http://localhost:3000
 echo (To stop the server later, press Ctrl-C here.)
 echo.

@@ -5,7 +5,7 @@
 // Socket.io 폴링/웹소켓은 가로채지 않는다(실시간 통신 유지).
 // ============================================================
 
-const CACHE = 'surviv-br-v2';
+const CACHE = 'shot-monster-v1';
 const APP_SHELL = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {

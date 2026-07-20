@@ -95,6 +95,30 @@ export class Particles {
     }
   }
 
+  // 폭발 효과 (수류탄)
+  explosion(x, y, radius) {
+    const count = pcount(24, 16);
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 60 + Math.random() * radius * 1.5;
+      this.items.push({
+        t: 'spark', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: 0.3 + Math.random() * 0.4, max: 0.7, size: 2 + Math.random() * 3,
+        color: Math.random() < 0.5 ? '#ff6a00' : '#ffd23f', grav: 0,
+      });
+    }
+    // 연기
+    for (let i = 0; i < pcount(8, 5); i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 20 + Math.random() * 60;
+      this.items.push({
+        t: 'spark', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 30,
+        life: 0.5 + Math.random() * 0.5, max: 1.0, size: 4 + Math.random() * 4,
+        color: 'rgba(100,100,100,0.6)', grav: 20,
+      });
+    }
+  },
+
   // 뜨는 데미지 숫자
   damageText(x, y, amount, isMe) {
     this.items.push({
