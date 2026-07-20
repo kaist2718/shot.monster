@@ -84,6 +84,7 @@ export const StartScreen = {
       o.value = c.code;
       o.style.cssText = 'background:#2a2f37;color:#fff;';
       o.dataset.nameKo = c.name;
+      o.dataset.nameEn = c.nameEn || c.code;
       sel.appendChild(o);
     }
     if (savedCountry) sel.value = savedCountry;
@@ -128,11 +129,12 @@ export const StartScreen = {
       nameEl.placeholder = I18N.t('namePlaceholder');
       countryLabel.textContent = I18N.t('country');
       opt0.textContent = I18N.t('countrySelect');
-      // 국가 옵션 표기: EN은 코드+영문(코드만 간결히), KO는 코드+한국어
+      // 국가 옵션 표기: EN은 [KR] South Korea, KO는 [KR] 한국
       for (const o of sel.children) {
         if (!o.value) continue;
         const ko = o.dataset.nameKo;
-        o.textContent = L === 'ko' ? '[' + o.value + '] ' + ko : '[' + o.value + '] ' + o.value;
+        const en = o.dataset.nameEn || o.value;
+        o.textContent = L === 'ko' ? '[' + o.value + '] ' + ko : '[' + o.value + '] ' + en;
       }
       if (savedCountry) sel.value = savedCountry;
       goBtn.textContent = returning ? I18N.t('continue') : I18N.t('start');
