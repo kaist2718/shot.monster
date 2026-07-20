@@ -59,7 +59,7 @@ let gameProfile = null;
 let pageHidden = false;
 let lastCursor = '';
 let serverFullMsg = false;
-let preferTouchUi = !!(Input.touch && Input.touch.enabled);  // HUD/스틱 표시용(hysteresis)
+let preferTouchUi = false;      // HUD/스틱 표시용(hysteresis) — TouchCtrl.init 후 갱신됨
 let hintAge = 0;
 
 // 미니맵 핑 / 퀵챗 표시
@@ -195,6 +195,8 @@ TouchCtrl.init(canvas, camera, {
   }
 });
 layoutMute(); // 터치 capability 확정 후 mute 위치 재배치
+// 터치 기기 감지 후 preferTouchUi 갱신
+preferTouchUi = !!(Input.touch && Input.touch.enabled);
 initOrientationHint();
 
 window.addEventListener('wheel', (e) => {
