@@ -10,6 +10,7 @@ import { Input } from './input.js';
 import { dist, TAU, clamp } from '../shared/utils.js';
 import { CONFIG } from '../shared/config.js';
 import { MobileSettings, SettingsPanel } from './mobile.js';
+import { Sound } from './sound.js';
 import { drawIcon } from './icons.js';
 
 const ZOOM_STEP = 1.14;
@@ -66,11 +67,13 @@ export const TouchCtrl = {
   _moveId: null, _moveOX: 0, _moveOY: 0, _moveCX: 0, _moveCY: 0,
   _aimId: null,  _aimOX: 0,  _aimOY: 0,  _aimCX: 0,  _aimCY: 0,
   _fireId: null,
+  _autoFireToggle: true,  // 자동발사 토글 (화면 버튼으로 on/off)
   _runToggle: false,
   _zoomInId: null, _zoomOutId: null,
   buttonReload: null, buttonWeapon: null, buttonFire: null, buttonRun: null,
   buttonBoard: null, buttonOrient: null, buttonSettings: null,
   buttonZoomIn: null, buttonZoomOut: null,
+  buttonAutoFire: null,
   _moveBase: null,
   _btnR: 26,
   _btnHitScale: 1.12,
@@ -195,6 +198,7 @@ export const TouchCtrl = {
     this.buttonBoard   = { x: sX + sGap * 2, y: sY, r: r2 };
     this.buttonOrient  = { x: sX + sGap * 3, y: sY, r: r2 };
     this.buttonSettings= { x: sX + sGap * 4, y: sY, r: r2 };
+    this.buttonAutoFire= { x: sX + sGap * 5, y: sY, r: r2 };
     // 퀵챗 버튼 (상단 우측 보조줄)
     this.buttonQuickChat = { x: sX + sGap * 5, y: sY, r: r2 };
 
@@ -317,6 +321,18 @@ export const TouchCtrl = {
       if (this._inButton(t, this.buttonWeapon))  { if (this._onSwitchWeapon) this._onSwitchWeapon(); continue; }
       if (fireBtn && this._inButton(t, this.buttonFire)) { this._fireId = t.identifier; continue; }
       if (this._inButton(t, this.buttonRun))     { this._runToggle = !this._runToggle; continue; }
+      // 수류탄 버튼 (듀얼/캐주얼 모두)
+      if (this._inButton(t, this._getGrenadeBtn()) && this._onThrowGrenade) {
+        this._grenadeId = t.identifier;
+        this._onThrowGrenade(t.clientX, t.clientY);
+        continue;
+      }
+      // 자동발사 토글 버튼
+      if (this._inButton(t, this.buttonAutoFire)) {
+        MobileSettings.set('autoFire', !MobileSettings.get('autoFire'));
+        Sound.play('click');
+        continue;
+      }
 
       // 좌/우 반 스틱 배정(헬퍼)
       const moveSide = this._isMoveSide(t.clientX);
@@ -659,6 +675,26 @@ export const TouchCtrl = {
     drawIcon(ctx, 'chat', button.x, button.y, r * 1.2, this._quickChatOpen ? '#20242b' : '#fff');
   },
 
+  // 자동발사 토글 버튼 그리기
+  _drawAutoFireBtn(ctx, button) {
+    if (!button) return;
+    const r = button.r;
+    const autoOn = MobileSettings.get('autoFire');
+    ctx.save();
+    ctx.fillStyle = autoOn ? 'rgba(255,210,63,0.8)' : 'rgba(100,100,100,0.5)';
+    ctx.beginPath(); ctx.arc(button.x, button.y, r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.40)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
+    // A / M 텍스트
+    ctx.save();
+    ctx.fillStyle = autoOn ? '#20242b' : '#fff';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(autoOn ? 'A' : 'M', button.x, button.y);
+    ctx.restore();
+  },
+
   endFrame() { Input.touch.reloadEdge = false; },
 
   // 수류탄 버튼 위치 계산 (화면 좌표)
@@ -690,6 +726,8 @@ export const TouchCtrl = {
       this._drawButton(ctx, this.buttonOrient,  'orient',  false, 'minor');
       this._drawButton(ctx, this.buttonSettings,'settings', SettingsPanel.isOpen(), 'minor');
       this._drawQuickChat(ctx, this.buttonQuickChat);
+      // 자동발사 토글 버튼
+      this._drawAutoFireBtn(ctx, this.buttonAutoFire);
     }
 
     // 수류탄 버튼 (생존자 + 보유 수류탄 있음)
