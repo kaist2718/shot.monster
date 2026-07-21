@@ -9,7 +9,7 @@ import { TouchCtrl } from './touch.js';
 import { Camera } from './camera.js';
 import { Net } from './net.js';
 import { renderWorld } from './render.js';
-import { drawHUD, drawLobby, drawRoundOver, drawSpectate, drawConnecting, drawVignette, drawScoreboard, drawMinimap } from './ui.js';
+import { drawHUD, drawLobby, drawRoundOver, drawSpectate, drawConnecting, drawVignette, drawScoreboard, drawMinimap, showOnehandTutorial, dismissOnehandTutorial, isOnehandTutorialVisible, canDismissOnehandTutorial } from './ui.js';
 import { showRewardedAd } from './ad.js';
 import { StartScreen } from './start.js';
 import { ModeSelect, RoomBrowser } from './mode.js';
@@ -62,6 +62,9 @@ let lastCursor = '';
 let serverFullMsg = false;
 let preferTouchUi = false;      // HUD/스틱 표시용(hysteresis) — TouchCtrl.init 후 갱신됨
 let hintAge = 0;
+let onehandTutorialActive = false; // 한손 모드 인게임 튜토리얼 표시 여부
+let onehandTutorialSessionShown = false; // 이번 세션에서 표시했는지 여부
+let prevTouchActive = false; // 이전 프레임 터치 활성 상태 (new touch 감지용)
 
 // 미니맵 핑 / 퀵챗 표시
 let activePings = []; // { x, y, type, name, ttl }
@@ -773,14 +776,34 @@ function step(ts) {
   }
 
   const touchUi = !!(Input.touch && Input.touch.enabled && preferTouchUi);
+  const currentScheme = touchUi ? (MobileSettings.get('scheme') || 'onehand') : null;
+  const curTouchActive = !!(Input.touch && Input.touch.active);
+  const newTouch = curTouchActive && !prevTouchActive; // 터치 시작 순간 감지
+  // 한손 모드 인게임 튜토리얼: 첫 터치 시 한 번만 자동 표시
+  if (currentScheme === 'onehand' && !onehandTutorialSessionShown && self && self.alive && phase === 'playing' && newTouch) {
+    onehandTutorialSessionShown = true;
+    onehandTutorialActive = true;
+    showOnehandTutorial();
+  }
+  // 튜토리얼 표시 중 새 터치 → 페이드아웃 시작 (최소 표시 시간 경과 후 + 같은 프레임 아닐 때)
+  if (onehandTutorialActive && isOnehandTutorialVisible() && newTouch && canDismissOnehandTutorial()) {
+    dismissOnehandTutorial();
+    onehandTutorialActive = false;
+  }
+  // 라운드 종료/사망 시 튜토리얼 리셋
+  if (phase !== 'playing' || (self && !self.alive)) {
+    onehandTutorialActive = false;
+  }
+  prevTouchActive = curTouchActive;
   const info = {
     self, snap: latest, ping: Net.rtt, killFeed, leaderboard: Net.leaderboard,
     aiLeaderboard: Net.aiLeaderboard, countryBoard: Net.countryBoard, myId: Net.yourId,
     mode: Net.mode, level: Net.level, lastAIResult, touch: touchUi,
     showHint: hintAge < 12,
-    scheme: touchUi ? (MobileSettings.get('scheme') || 'onehand') : undefined,
+    scheme: currentScheme,
     touchActive: touchUi ? !!(Input.touch && Input.touch.active) : false,
     hintAge,
+    onehandTutorialVisible: isOnehandTutorialVisible(),
   };
   if (latest.phase === 'playing') {
     drawHUD(ctx, W, H, info);

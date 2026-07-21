@@ -13,6 +13,7 @@ import { Net } from './net.js';
 import { MobileSettings, SettingsPanel } from './mobile.js';
 import { Sound } from './sound.js';
 import { drawIcon } from './icons.js';
+import { I18N } from './i18n.js';
 
 const ZOOM_STEP = 1.14;
 const CTL = CONFIG.CONTROLS || {};
@@ -87,6 +88,7 @@ export const TouchCtrl = {
   buttonBoard: null, buttonOrient: null, buttonSettings: null,
   buttonZoomIn: null, buttonZoomOut: null,
   buttonAutoFire: null,
+  buttonScheme: null,
   _moveBase: null,
   _btnR: 26,
   _btnHitScale: 1.12,
@@ -214,8 +216,11 @@ export const TouchCtrl = {
     this.buttonOrient  = { x: sX + sGap * 3, y: sY, r: r2 };
     this.buttonSettings= { x: sX + sGap * 4, y: sY, r: r2 };
     this.buttonAutoFire= { x: sX + sGap * 5, y: sY, r: r2 };
-    // 퀵챗 버튼 (상단 우측 보조줄) - buttonAutoFire 다음에 배치
+    // 퀵챗 버튼 (상단 좌측 보조줄) - buttonAutoFire 다음에 배치
     this.buttonQuickChat = { x: sX + sGap * 6, y: sY, r: r2 };
+    // 조작 모드 전환 버튼 (상단 좌측 보조줄 끝) — 작은 화면에서는 숨김
+    const schemeX = sX + sGap * 7;
+    this.buttonScheme = (schemeX + r2 + 8 < W) ? { x: schemeX, y: sY, r: r2 } : null;
 
     this._btnR = r1;
     this._lefty = lefty;
@@ -295,6 +300,11 @@ export const TouchCtrl = {
       if (this._inButton(t, this.buttonBoard))   { this._boardOpen = !this._boardOpen; Input.touch.boardOpen = this._boardOpen; continue; }
       if (this._inButton(t, this.buttonQuickChat)) {
         this._toggleQuickChat();
+        continue;
+      }
+      // 조작 모드 전환 버튼 (한손 ↔ 듀얼 ↔ 캐주얼)
+      if (this._inButton(t, this.buttonScheme)) {
+        this._toggleScheme();
         continue;
       }
 
@@ -455,9 +465,11 @@ export const TouchCtrl = {
       // 올바른 self 파라미터로 업데이트되므로, 여기서 호출하면 self=undefined로 firing이 false가 됨
       return;
     }
-    // 한손 모드: 터치 종료 시 자동 모드 해제 (다음 프레임에서 _syncOnehand가 정지 처리)
+    // 한손 모드: 터치 종료 시 즉시 정지 + 평활화 상태 초기화
+    // _sync() 호출 없이 직접 설정 — self 없이 _sync 호출 시 불필요한 상태 리셋 방지
+    // 주의: Input.touch를 전달해야 함 (for 루프의 t는 DOM Touch 이벤트)
     if (scheme === 'onehand') {
-      this._sync(); // 이동/발사 정지
+      this._resetOnehandState(Input.touch);
       return;
     }
     this._sync();
@@ -554,11 +566,7 @@ export const TouchCtrl = {
     t.sessionActive = t.active || t.reloadEdge;
 
     if (!self || !self.alive || !t.active) {
-      // 터치가 없거나 플레이어가 죽었으면 정지
-      // 속도/크기 초기화 (angular smoothing+speed envelope 방식)
-      this._moveSpeed = 0;
-      this._smoothMag = 0;
-      t.moveX = 0; t.moveY = 0; t.aiming = false; t.firing = false; t.sprint = false;
+      this._resetOnehandState(t);
       return;
     }
 
@@ -727,14 +735,18 @@ export const TouchCtrl = {
       } else if (MobileSettings.get('onehandAutoAim') === false) {
         rawMoveX = 0; rawMoveY = 0;
       } else {
-        // 타겟 없음 — 존 중심으로 천천히 이동하며 대기
-        const toCenterX = zoneCenter.x - self.x;
-        const toCenterY = zoneCenter.y - self.y;
-        const toCenterLen = Math.hypot(toCenterX, toCenterY);
-        if (toCenterLen > 100) {
-          rawMoveX = (toCenterX / toCenterLen) * 0.5;
-          rawMoveY = (toCenterY / toCenterLen) * 0.5;
+        // 타겟 없음 — 존 경계/바깥에서만 존 중심으로 이동, 안쪽이면 정지
+        // (존 안쪽에서 무작정 이동하는 것 방지 → "마음대로 움직임" 문제 해결)
+        if (zoneEdgeDist < 50) { // 존 경계 50px 이내 or 바깥
+          const toCenterX = zoneCenter.x - self.x;
+          const toCenterY = zoneCenter.y - self.y;
+          const toCenterLen = Math.hypot(toCenterX, toCenterY);
+          if (toCenterLen > 100) {
+            rawMoveX = (toCenterX / toCenterLen) * 0.5;
+            rawMoveY = (toCenterY / toCenterLen) * 0.5;
+          }
         }
+        // 존 안쪽 + 타겟 없음 → 정지 (random 움직임 방지)
       }
     }
 
@@ -747,13 +759,22 @@ export const TouchCtrl = {
     
     // Smooth state 초기화
     if (this._smoothMoveAngle === undefined) {
-      this._smoothMoveAngle = rawMag > 0.01 ? rawAngle : (self ? Math.atan2(self.vy || 0, self.vx || 0) : 0);
+      // self.velocity 기반 초기화: 정지 상태(vx=vy=0)이면 마지막 rawAngle 사용
+      // Math.atan2(0,0)=0 → 오른쪽 방향 점프 방지
+      if (rawMag > 0.01) {
+        this._smoothMoveAngle = rawAngle;
+      } else if (self && (Math.hypot(self.vx || 0, self.vy || 0) > 1)) {
+        this._smoothMoveAngle = Math.atan2(self.vy, self.vx);
+      } else {
+        // 정지 상태: self.angle 사용 (현재 바라보는 방향)
+        this._smoothMoveAngle = self ? self.angle : 0;
+      }
       this._smoothMag = 0;
       this._moveSpeed = 0;
     }
     
     // 각도 평활화 (Angular lerp with shortest arc)
-    const ANGLE_SMOOTH_K = 0.20; // 20% per frame → ~5 frames to converge
+    const ANGLE_SMOOTH_K = 0.30; // 30% per frame → ~3 frames to converge (반응성 향상)
     if (rawMag > 0.01) {
       const diff = Math.atan2(Math.sin(rawAngle - this._smoothMoveAngle), Math.cos(rawAngle - this._smoothMoveAngle));
       this._smoothMoveAngle += diff * ANGLE_SMOOTH_K;
@@ -761,13 +782,13 @@ export const TouchCtrl = {
     // rawMag=0이면 마지막 각도 유지 (방향 기억)
     
     // 크기 평활화
-    const MAG_SMOOTH_K = 0.30;
+    const MAG_SMOOTH_K = 0.35;
     this._smoothMag += (rawMag - this._smoothMag) * MAG_SMOOTH_K;
     if (this._smoothMag < 0.01 && rawMag === 0) this._smoothMag = 0;
     
     // 속도 포락선: 가속/감속 (급정지/급발진 방지)
-    const ACCEL = 0.06;  // 초당 3.6 → 약 16프레임 만에 최고속도
-    const DECEL = 0.12;  // 초당 7.2 → 약 8프레임 만에 정지 (감속 빠르게)
+    const ACCEL = 0.12;  // 가속도 증가 → 약 8프레임 만에 최고속도 (반응성 향상)
+    const DECEL = 0.25;  // 감속도 강화 → 약 4프레임 만에 정지 (터치 해제 시 즉시 멈춤)
     const targetSpeed = clamp(this._smoothMag, 0, 1);
     if (targetSpeed > this._moveSpeed) {
       this._moveSpeed = Math.min(this._moveSpeed + ACCEL, targetSpeed);
@@ -833,6 +854,23 @@ export const TouchCtrl = {
     return baseRange * (1.2 - 0.4 * aggression);
   },
 
+  // 한손 모드 상태 초기화 헬퍼 — 터치 해제/사망/라운드 시작 시 공용 리셋
+  // _onEnd에서 self 없이도 안전하게 호출 가능
+  _resetOnehandState(t) {
+    t.moveX = 0; t.moveY = 0;
+    t.aiming = false; t.firing = false; t.sprint = false;
+    t.active = false;
+    this._moveSpeed = 0;
+    this._smoothMag = 0;
+    this._smoothMoveAngle = undefined;
+    this._smoothAimX = undefined;
+    this._smoothAimY = undefined;
+    this._lockedTargetId = null;
+    this._firingLatched = false;
+    this._strafeDuration = undefined;
+    this._strafeFlipFrame = undefined;
+  },
+
   // 무기 전환 헬퍼 (한손 모드용) — 서버에 특정 무기로 전환 요청
   _switchToWeapon(key) {
     if (this._lastWeaponSwitch !== key) {
@@ -857,7 +895,7 @@ export const TouchCtrl = {
 
   // 장애물 회피: (x,y)에서 방향 (nx,ny)로 이동 시 장애물과 충돌하는지 확인
   _isBlocked(x, y, nx, ny) {
-    const lookahead = CONFIG.PLAYER_RADIUS * 3;
+    const lookahead = CONFIG.PLAYER_RADIUS * 4; // 72px — 충분한 탐색 거리로 벽 걸림 방지
     const testX = x + nx * lookahead;
     const testY = y + ny * lookahead;
     for (const o of this._obstacles) {
@@ -890,8 +928,8 @@ export const TouchCtrl = {
   _getCachedAvoidDir(x, y, nx, ny, now) {
     if (!this._avoidCache) this._avoidCache = { nx: 0, ny: 0, lastX: 0, lastY: 0, lastTime: 0 };
     const c = this._avoidCache;
-    const moved = Math.hypot(x - c.lastX, y - c.lastY) > 15; // 15px 이상 이동 시 재계산
-    const expired = now - c.lastTime > 200; // 200ms 마다 재계산
+    const moved = Math.hypot(x - c.lastX, y - c.lastY) > 12; // 12px 이상 이동 시 재계산
+    const expired = now - c.lastTime > 100; // 100ms 마다 재계산 (지터 방지 + 반응성 균형)
     if (moved || expired) {
       const result = this._findAvoidanceDir(x, y, nx, ny);
       c.nx = result.nx;
@@ -1084,6 +1122,29 @@ export const TouchCtrl = {
     this._onMapPing(wx, wy, 'here');
   },
 
+  // 조작 모드 전환 (한손 ↔ 듀얼 ↔ 캐주얼 순환)
+  // 가벼운 리셋: _runToggle/_boardOpen 등 보존, 모드별 상태만 클리어
+  _toggleScheme() {
+    const current = MobileSettings.get('scheme') || 'dual';
+    const order = ['onehand', 'dual', 'casual'];
+    const idx = order.indexOf(current);
+    const next = order[(idx + 1) % order.length];
+    MobileSettings.set('scheme', next);
+    // 모드별 잔존 상태 초기화 (가벼운 리셋)
+    this._moveId = null; this._aimId = null; this._fireId = null;
+    this._aimLatched = false; this._sprintLatched = false;
+    this._casualTapActive = false; this._casualTarget = null;
+    this._resetOnehandState(Input.touch);
+    Input.touch.moveX = 0; Input.touch.moveY = 0;
+    Input.touch.aiming = false; Input.touch.firing = false; Input.touch.sprint = false;
+    Input.touch.active = false;
+    Sound.play('click');
+    // 햅틱 피드백
+    if (MobileSettings.get('vibration') && typeof navigator.vibrate === 'function') {
+      try { navigator.vibrate(15); } catch { /* 무시 */ }
+    }
+  },
+
   // 퀵챗 패널 토글
   _toggleQuickChat() {
     this._quickChatOpen = !this._quickChatOpen;
@@ -1142,6 +1203,27 @@ export const TouchCtrl = {
   },
 
   // 자동발사 토글 버튼 그리기
+  // 조작 모드 전환 버튼 — 현재 모드 표시 + 탭 시 순환 전환
+  _drawSchemeBtn(ctx, button) {
+    if (!button) return;
+    const scheme = MobileSettings.get('scheme') || 'dual';
+    const t = I18N.t;
+    const schemeLabel = scheme === 'onehand' ? t('schemeOnehand') : (scheme === 'casual' ? t('schemeCasual') : t('schemeDual'));
+    const schemeColor = scheme === 'onehand' ? '#ffd23f' : (scheme === 'casual' ? '#7fc4ff' : '#7fe08a');
+    ctx.save();
+    // 배경
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.beginPath(); ctx.arc(button.x, button.y, button.r, 0, TAU); ctx.fill();
+    // 테두리 (현재 모드 강조)
+    ctx.strokeStyle = schemeColor; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(button.x, button.y, button.r, 0, TAU); ctx.stroke();
+    // 모드 라벨
+    ctx.fillStyle = schemeColor;
+    ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(schemeLabel, button.x, button.y + 3);
+    ctx.restore();
+  },
+
   _drawAutoFireBtn(ctx, button) {
     if (!button) return;
     const r = button.r;
@@ -1222,6 +1304,7 @@ export const TouchCtrl = {
       this._drawButton(ctx, this.buttonOrient,  'orient',  false, 'minor');
       this._drawButton(ctx, this.buttonSettings,'settings', SettingsPanel.isOpen(), 'minor');
       this._drawQuickChat(ctx, this.buttonQuickChat);
+      this._drawSchemeBtn(ctx, this.buttonScheme);
       // 자동발사 토글 버튼
       this._drawAutoFireBtn(ctx, this.buttonAutoFire);
     }

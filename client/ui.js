@@ -24,8 +24,12 @@ export function drawHUD(ctx, W, H, info) {
 
   ctx.font = '12px sans-serif';
   if (touch) {
+    // 한손 모드 인게임 튜토리얼 오버레이 (첫 플레이 시 한 번만 표시)
+    if (info.scheme === 'onehand' && info.onehandTutorialVisible && self && self.alive && phase === 'playing') {
+      drawOnehandTutorial(ctx, W, H);
+    }
     // 모바일 조작 힌트 (게임 플레이 중, 초반에만)
-    if (info.showHint !== false && info.scheme && self && self.alive && phase === 'playing' && info.hintAge < 10) {
+    if (info.showHint !== false && info.scheme && self && self.alive && phase === 'playing' && info.hintAge < 10 && !info.onehandTutorialVisible) {
       const hintText = info.scheme === 'onehand'
         ? (info.touchActive ? '🟡 ' + t('onehandModeIndicator') : '👆 ' + t('stickOnehand'))
         : info.scheme === 'casual'
@@ -297,6 +301,111 @@ function drawKillFeed(ctx, W, feed, minimapSize) {
     ctx.fillStyle = `rgba(255,255,255,${0.5 + 0.45 * alpha})`;
     ctx.fillText(kf.text, W - pad - 4, y);
   }
+}
+
+// 한손 모드 인게임 튜토리얼 오버레이 — 첫 플레이 시 자동 표시, 탭으로 해제
+let _onehandTutAlpha = 0;
+let _onehandTutStartTime = 0;
+let _onehandTutLastDraw = 0;
+const ONEHAND_TUT_FADE_IN = 0.4;   // 페이드인 시간(초)
+const ONEHAND_TUT_FADE_OUT = 0.25;  // 페이드아웃 시간(초)
+const ONEHAND_TUT_MIN_DISPLAY = 600; // 최소 표시 시간(ms) — 같은 프레임 show+dismiss 방지
+
+export function drawOnehandTutorial(ctx, W, H) {
+  const now = performance.now();
+  const elapsed = (now - _onehandTutStartTime) / 1000;
+  // 페이드인
+  if (_onehandTutAlpha < 1) {
+    _onehandTutAlpha = Math.min(1, elapsed / ONEHAND_TUT_FADE_IN);
+  }
+  // 페이드아웃 중이면 알파 감소 (실제 프레임 시간 사용)
+  if (_onehandTutFading) {
+    const dt = _onehandTutLastDraw > 0 ? (now - _onehandTutLastDraw) / 1000 : 1 / 60;
+    _onehandTutAlpha -= Math.min(dt, 0.05) / ONEHAND_TUT_FADE_OUT;
+    if (_onehandTutAlpha <= 0) {
+      _onehandTutAlpha = 0;
+      _onehandTutVisible = false;
+      _onehandTutFading = false;
+      _onehandTutStartTime = 0;
+    }
+  }
+  _onehandTutLastDraw = now;
+  if (_onehandTutAlpha <= 0) return;
+
+  const alpha = _onehandTutAlpha;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // 반투명 배경
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0, W, H);
+
+  // 중앙 카드
+  const cardW = Math.min(380, W - 32);
+  const cardH = 320;
+  const cx = W / 2, cy = H / 2;
+  ctx.fillStyle = 'rgba(16,20,27,0.92)';
+  roundRect(ctx, cx - cardW / 2, cy - cardH / 2, cardW, cardH, 16); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,210,63,0.4)'; ctx.lineWidth = 2;
+  roundRect(ctx, cx - cardW / 2, cy - cardH / 2, cardW, cardH, 16); ctx.stroke();
+
+  // 타이틀
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 20px sans-serif';
+  ctx.fillText(t('onehandTutorialTitle'), cx, cy - cardH / 2 + 36);
+
+  // 설명 항목
+  const items = [
+    { key: 'onehandTutorialTouch', icon: '👆' },
+    { key: 'onehandTutorialRelease', icon: '✋' },
+    { key: 'onehandTutorialAim', icon: '🎯' },
+    { key: 'onehandTutorialFire', icon: '🔫' },
+    { key: 'onehandTutorialMove', icon: '🚶' },
+    { key: 'onehandTutorialTip', icon: '💡' },
+  ];
+  let iy = cy - cardH / 2 + 62;
+  for (const item of items) {
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#fff'; ctx.font = '18px sans-serif';
+    ctx.fillText(item.icon, cx - cardW / 2 + 20, iy);
+    ctx.font = '13px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    ctx.fillText(t(item.key), cx - cardW / 2 + 46, iy);
+    iy += 36;
+  }
+
+  // 하단 안내
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '11px sans-serif';
+  ctx.fillText(t('onehandTutorialDismiss'), cx, cy + cardH / 2 - 16);
+
+  ctx.restore();
+}
+
+// 한손 모드 튜토리얼 상태 관리
+let _onehandTutVisible = false;
+let _onehandTutFading = false;
+
+export function showOnehandTutorial() {
+  _onehandTutVisible = true;
+  _onehandTutFading = false;
+  _onehandTutAlpha = 0;
+  _onehandTutStartTime = performance.now(); // 즉시 설정 — step()에서 canDismiss 체크 시점 대비
+  _onehandTutLastDraw = 0;
+}
+
+export function dismissOnehandTutorial() {
+  if (_onehandTutVisible && !_onehandTutFading) {
+    _onehandTutFading = true;
+  }
+}
+
+export function isOnehandTutorialVisible() {
+  return _onehandTutVisible;
+}
+
+export function canDismissOnehandTutorial() {
+  // 최소 표시 시간 경과 후에만 해제 가능 (같은 프레임 show+dismiss 방지)
+  return _onehandTutVisible && performance.now() - _onehandTutStartTime > ONEHAND_TUT_MIN_DISPLAY;
 }
 
 export function drawConnecting(ctx, W, H) {
